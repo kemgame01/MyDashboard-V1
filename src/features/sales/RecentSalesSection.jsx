@@ -1,12 +1,12 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useInventory } from "../../hooks/useInventory";
 import useCustomers from "../../hooks/useCustomers";
 import { exportCSV } from "../../utils/exportCSV";
 import StyledDatePicker from "../../components/StyledDatePicker";
-import InputField from "../../components/InputField";
 
 export default function RecentSalesSection({ user, sales }) {
-  const [dateStart, setDateStart] = useState(null);
+  // Default Start Date: today
+  const [dateStart, setDateStart] = useState(new Date());
   const [dateEnd, setDateEnd] = useState(null);
   const [channelFilter, setChannelFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
@@ -18,7 +18,10 @@ export default function RecentSalesSection({ user, sales }) {
   const inventory = useInventory(user);
   const customers = useCustomers(user?.uid, "");
 
-  // Dropdown Options
+  useEffect(() => { setPage(1); }, [
+    dateStart, dateEnd, channelFilter, productFilter, customerFilter, search
+  ]);
+
   const productOptions = useMemo(() => {
     const all = (inventory.inventory || []).map(p => p.name).filter(Boolean);
     return Array.from(new Set(all));
@@ -31,7 +34,6 @@ export default function RecentSalesSection({ user, sales }) {
 
   const channelOptions = ["", "Facebook", "LINE", "Shopee", "Lazada", "Other"];
 
-  // --- Filtering logic
   const filteredSales = useMemo(() => {
     return (sales || []).filter(sale => {
       let date = sale.date?.toDate ? sale.date.toDate() : new Date(sale.date);
@@ -50,7 +52,7 @@ export default function RecentSalesSection({ user, sales }) {
       // Customer
       if (customerFilter && sale.customerName !== customerFilter) return false;
 
-      // Search
+      // Search (case-insensitive)
       if (search) {
         const searchLower = search.toLowerCase();
         const fields = [
@@ -63,39 +65,38 @@ export default function RecentSalesSection({ user, sales }) {
     });
   }, [sales, dateStart, dateEnd, channelFilter, productFilter, customerFilter, search]);
 
-  // Pagination
   const pagedSales = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
     return filteredSales.slice(start, start + rowsPerPage);
   }, [filteredSales, page]);
 
-  // Total summary
   const totalAmount = useMemo(
     () => filteredSales.reduce((sum, s) => sum + Number(s.amount || (s.products?.[0]?.amount) || 0), 0),
     [filteredSales]
   );
 
-  // Export
   const handleExport = () => {
-    exportCSV(filteredSales, "sales-report.csv");
+    if (!filteredSales.length) {
+      alert("No data to export!");
+      return;
+    }
+    exportCSV("sales-report.csv", filteredSales);
   };
 
-  // --- Helper: Local Timezone Display (GMT+7) ---
-    const formatTime = date => {
+  const formatTime = date => {
     try {
-        const d = date?.toDate ? date.toDate() : new Date(date);
-        return d.toLocaleTimeString("en-US", {
+      const d = date?.toDate ? date.toDate() : new Date(date);
+      return d.toLocaleTimeString("th-TH", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        hour12: true, // <-- AM/PM!
+        hour12: false,
         timeZone: "Asia/Bangkok"
-        });
+      });
     } catch {
-        return "-";
+      return "-";
     }
-    };
-
+  };
 
   return (
     <div className="bg-white rounded-2xl shadow mb-8 p-4 sm:p-8 w-full">
