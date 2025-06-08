@@ -15,6 +15,7 @@ export function useUserProfile(editingUserId, currentUser) {
   });
   const [imagePreview, setImagePreview] = useState("");
   const [profileImage, setProfileImage] = useState(null);
+  const [imageLink, setImageLink] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -41,10 +42,11 @@ export function useUserProfile(editingUserId, currentUser) {
             isRootAdmin: !!data.isRootAdmin,
           });
           setImagePreview(data.photoURL ?? '');
+          setImageLink(data.photoURL ?? '');
         }
       })
       .finally(() => setLoading(false));
-  }, [editingUserId]); // Only run when user id changes
+  }, [editingUserId]);
 
   useEffect(() => {
     return () => {
@@ -67,6 +69,14 @@ export function useUserProfile(editingUserId, currentUser) {
     if (!file) return;
     setProfileImage(file);
     setImagePreview(URL.createObjectURL(file));
+    setImageLink('');
+  };
+
+  const handleImageLinkChange = (e) => {
+    const url = e.target.value;
+    setImageLink(url);
+    setProfileImage(null);
+    setImagePreview(url);
   };
 
   const handleSave = async () => {
@@ -80,12 +90,14 @@ export function useUserProfile(editingUserId, currentUser) {
         address: form.address ?? '',
       };
       if (isAdmin) {
-        updates.role = form.role ?? '';
+        updates.role = (form.role ?? '').toLowerCase(); // normalize for DB
         updates.blocked = !!form.blocked;
       }
       if (profileImage) {
         const url = await uploadProfileImage(userData.id, profileImage);
         updates.photoURL = url;
+      } else if (imageLink) {
+        updates.photoURL = imageLink;
       }
       await updateUserData(userData.id, updates);
       // Refresh user data
@@ -102,6 +114,7 @@ export function useUserProfile(editingUserId, currentUser) {
         isRootAdmin: !!newData.isRootAdmin,
       });
       setImagePreview(newData.photoURL ?? '');
+      setImageLink(newData.photoURL ?? '');
       setProfileImage(null);
       setSaving(false);
       return true;
@@ -120,12 +133,15 @@ export function useUserProfile(editingUserId, currentUser) {
     setImagePreview,
     profileImage,
     setProfileImage,
+    imageLink, // <-- ADD THIS
+    setImageLink, // <-- (optional, if you want to set manually)
     loading,
     saving,
     error,
     setError,
     handleChange,
     handleImageChange,
+    handleImageLinkChange, // <-- ADD THIS so your UI can call it
     handleSave,
     isAdmin,
   };

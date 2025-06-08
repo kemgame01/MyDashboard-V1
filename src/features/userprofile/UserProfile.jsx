@@ -5,6 +5,7 @@ import SendPasswordResetButton from '../users/SendPasswordResetButton';
 import { useUserProfile } from './useUserProfile';
 import { canEditProfile, canEditRoles } from '../../utils/permissions';
 import { useMergedUser } from '../../hooks/useMergedUser';
+import { getRoleLabel, getRoleColor } from "../../utils/roles";
 
 function isFormChanged(form, userData) {
   if (!userData) return false;
@@ -28,7 +29,7 @@ const UserProfile = ({ targetUserId = null }) => {
     userData,
     form,
     imagePreview,
-    profileImage,
+    imageLink,
     loading,
     saving,
     error,
@@ -36,8 +37,10 @@ const UserProfile = ({ targetUserId = null }) => {
     setImagePreview,
     setProfileImage,
     handleChange,
+    handleImageLinkChange,
     handleImageChange,
     handleSave,
+    setImageLink,
   } = useUserProfile(currentUserId, authUser);
 
   useEffect(() => {
@@ -102,6 +105,7 @@ const UserProfile = ({ targetUserId = null }) => {
       isRootAdmin: !!userData.isRootAdmin,
     });
     setImagePreview(userData.photoURL ?? '');
+    setImageLink(userData.photoURL ?? '');
     setProfileImage(null);
   };
 
@@ -138,6 +142,17 @@ const UserProfile = ({ targetUserId = null }) => {
           className="block text-sm mt-2"
           disabled={!editing}
         />
+        <input
+          type="text"
+          placeholder="Image URL"
+          value={imageLink}
+          onChange={(e) => {
+            handleImageLinkChange(e);
+            setHasChanged(true);
+          }}
+          className="block text-sm mt-2 border rounded px-2 py-1"
+          disabled={!editing}
+        />
       </div>
 
       <form onSubmit={onSubmit} autoComplete="off">
@@ -163,10 +178,8 @@ const UserProfile = ({ targetUserId = null }) => {
             <div className="space-y-3 bg-gray-50 rounded-lg p-4 border border-gray-100">
               <div>
                 <span className="font-medium">Current Role: </span>
-                <span className="ml-1">
-                  {userData.role
-                    ? userData.role.charAt(0).toUpperCase() + userData.role.slice(1)
-                    : "N/A"}
+                <span className={`ml-1 px-2 py-1 rounded text-xs font-semibold ${getRoleColor(userData.role)}`}>
+                  {getRoleLabel(userData.role)}
                 </span>
               </div>
               <div>

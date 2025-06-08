@@ -3,27 +3,26 @@ import { useNavigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import Sidebar from './Sidebar';
+import Layout from './Layout'; // Import your new Layout!
 import CustomerSection from './CustomerSection';
 import RoleManagementSection from '../features/users/RoleManagementSection';
 import TaskManagementSection from './TaskManagementSection';
 import CategoryBrandManager from './CategoryBrandManager';
 import InventoryDashboard from '../features/inventory/InventoryDashboard';
 import UserProfile from '../features/userprofile/UserProfile';
+import SalesDashboard from '../features/sales/SalesDashboard';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('customers');
   const [user, setUser] = useState(undefined); // undefined = loading, null = not logged in
 
-  // Fetch merged user on auth state change
   useEffect(() => {
     const savedSection = localStorage.getItem('activeSection');
     if (savedSection) setActiveSection(savedSection);
 
     const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
       if (authUser) {
-        // Fetch Firestore profile
         const userDocRef = doc(db, 'users', authUser.uid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
@@ -50,23 +49,21 @@ const Dashboard = () => {
     }
   };
 
-  // Main navigation callback for sidebar
   const showSection = (section) => {
     setActiveSection(section);
     localStorage.setItem('activeSection', section);
   };
 
-  // Loading and unauthorized states
   if (user === undefined) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50 text-gray-400">
+      <div className="flex items-center justify-center h-screen bg-[#f5f7fb] text-gray-400">
         Loading user...
       </div>
     );
   }
   if (!user) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50 text-red-600">
+      <div className="flex items-center justify-center h-screen bg-[#f5f7fb] text-red-600">
         User not found or not authorized.
       </div>
     );
@@ -76,32 +73,32 @@ const Dashboard = () => {
   const role = (user.role || "").toLowerCase();
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar
-        user={user}
-        handleLogout={handleLogout}
-        showSection={showSection}
-      />
-      <div className="flex-1 p-8 bg-white">
-        {activeSection === 'customers' && <CustomerSection userId={user.uid} user={user} />}
-        {activeSection === 'roleManagement' && (role === "admin" || isRootAdmin) && (
-          <RoleManagementSection currentUser={user} />
-        )}
-        {activeSection === 'taskManagement' && (role === "admin" || role === "manager" || isRootAdmin) && (
-          <TaskManagementSection userId={user.uid} isRootAdmin={isRootAdmin} />
-        )}
-        {activeSection === 'inventory' && (role === "admin" || role === "manager" || isRootAdmin) && (
-          <InventoryDashboard user={user} />
-        )}
-        {activeSection === 'brandCategory' && isRootAdmin && (
-          <CategoryBrandManager user={user} />
-        )}
-        {activeSection === 'userProfile' && (
-          // Pass user object as currentUser for all permissions!
-          <UserProfile currentUser={user} />
-        )}
-      </div>
-    </div>
+    <Layout
+      user={user}
+      activeSection={activeSection}
+      handleLogout={handleLogout}
+      showSection={showSection}
+    >
+      {activeSection === 'customers' && <CustomerSection userId={user.uid} user={user} />}
+      {activeSection === 'roleManagement' && (role === "admin" || isRootAdmin) && (
+        <RoleManagementSection currentUser={user} />
+      )}
+      {activeSection === 'taskManagement' && (role === "admin" || role === "manager" || isRootAdmin) && (
+        <TaskManagementSection userId={user.uid} isRootAdmin={isRootAdmin} />
+      )}
+      {activeSection === 'inventory' && (role === "admin" || role === "manager" || isRootAdmin) && (
+        <InventoryDashboard user={user} />
+      )}
+      {activeSection === 'sales' && (
+        <SalesDashboard user={user} />   
+      )}
+      {activeSection === 'brandCategory' && isRootAdmin && (
+        <CategoryBrandManager user={user} />
+      )}
+      {activeSection === 'userProfile' && (
+        <UserProfile currentUser={user} />
+      )}
+    </Layout>
   );
 };
 

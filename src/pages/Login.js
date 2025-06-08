@@ -10,6 +10,7 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,13 +28,16 @@ const Login = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     const result = await loginUser(email, password);
 
     if (result.success) {
+      // lastLogin is set in Firestore in loginUser
       navigate('/dashboard', { replace: true });
     } else {
       setError('Failed to login. Please check your credentials.');
+      setLoading(false);
     }
   };
 
@@ -61,6 +65,7 @@ const Login = () => {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
           />
 
           <InputField
@@ -70,13 +75,15 @@ const Login = () => {
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            disabled={loading}
           />
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded-lg mt-4 hover:bg-blue-700 transition font-semibold"
+            disabled={loading}
+            className={`w-full bg-blue-600 text-white py-2 rounded-lg mt-4 transition font-semibold ${loading ? "opacity-60 cursor-not-allowed" : "hover:bg-blue-700"}`}
           >
-            Login
+            {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 

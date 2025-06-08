@@ -1,7 +1,7 @@
 // src/services/authService.js
 
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { setDoc, doc, collection, query, where, getDocs, orderBy, limit, deleteDoc, getDoc } from 'firebase/firestore';
+import { setDoc, doc, collection, query, where, getDocs, orderBy, limit, deleteDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 // --- Signup ---
@@ -13,6 +13,7 @@ export const signupUser = async ({ email, password, name }) => {
       email,
       role: 'user',
       isRootAdmin: false,
+      lastLogin: serverTimestamp(), // Record initial login for new user
     });
     return { success: true, user: userCredential.user };
   } catch (error) {
@@ -24,6 +25,10 @@ export const signupUser = async ({ email, password, name }) => {
 export const loginUser = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    // Update Firestore with lastLogin
+    await updateDoc(doc(db, 'users', userCredential.user.uid), {
+      lastLogin: serverTimestamp(),
+    });
     return { success: true, user: userCredential.user };
   } catch (error) {
     return { success: false, error: error.message };

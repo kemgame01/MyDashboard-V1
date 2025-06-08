@@ -7,20 +7,27 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 
 const InventorySummary = ({ inventory }) => {
   const totalProducts = inventory.length;
-  const totalInStock = inventory.reduce((sum, item) => sum + Number(item.quantity), 0);
-  const lowStockCount = inventory.filter(item => Number(item.quantity) > 0 && Number(item.quantity) < Number(item.minStock)).length;
-  const outOfStockCount = inventory.filter(item => Number(item.quantity) === 0).length;
-
+  const totalInStock = inventory.reduce(
+    (sum, item) => sum + Number(item.quantity),
+    0
+  );
+  const inStockCount = inventory.filter(
+    (item) => Number(item.quantity) >= Number(item.minStock)
+  ).length;
+  const lowStockCount = inventory.filter(
+    (item) =>
+      Number(item.quantity) > 0 && Number(item.quantity) < Number(item.minStock)
+  ).length;
+  const outOfStockCount = inventory.filter(
+    (item) => Number(item.quantity) === 0
+  ).length;
+  
   const chartData = {
     labels: ["In Stock", "Low Stock", "Out of Stock"],
     datasets: [
       {
         label: "Inventory",
-        data: [
-          totalInStock - lowStockCount - outOfStockCount,
-          lowStockCount,
-          outOfStockCount,
-        ],
+        data: [inStockCount, lowStockCount, outOfStockCount],
         backgroundColor: ["#22c55e", "#eab308", "#ef4444"],
         borderColor: ["#16a34a", "#ca8a04", "#b91c1c"],
         borderWidth: 1,

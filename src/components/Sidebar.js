@@ -7,7 +7,7 @@ const Sidebar = ({
   showSection,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  // 1. Wait for user data before rendering sidebar content
+
   if (!user) {
     return (
       <aside className="w-64 bg-gray-800 text-white flex flex-col items-center justify-center min-h-screen">
@@ -16,18 +16,19 @@ const Sidebar = ({
     );
   }
 
-  // 2. User info (with safe defaults)
+  // User info (with safe defaults)
   const userId = user.uid || "-";
   const userName = user.name || user.displayName || (user.email ? user.email.split('@')[0] : "Unknown");
   const userEmail = user.email || "-";
   const userRole = (user.role || "").toLowerCase();
   const isRootAdmin = user.isRootAdmin === true;
+  const photoURL = user.photoURL || "";
 
   const getMaskedId = (uid) => {
-  if (!uid) return "-";
-  return uid.slice(0, 10) + "-XXXXXXX";
+    if (!uid) return "-";
+    return uid.slice(0, 10) + "-XXXXXXX";
   };
-  
+
   const getInitials = (nameOrEmail) => {
     if (!nameOrEmail) return "?";
     return nameOrEmail
@@ -38,48 +39,33 @@ const Sidebar = ({
       .slice(0, 2);
   };
 
-  // 3. Sidebar links with permissions
   const navLinks = [
-    {
-      label: "Dashboard",
-      onClick: () => showSection("customers", user),
-      show: true,
-    },
-    {
-      label: "Profile",
-      onClick: () => showSection("userProfile", user),
-      show: true,
-    },
-    {
-      label: "Role Management",
-      onClick: () => showSection("roleManagement", user),
-      show: userRole === "admin" || isRootAdmin,
-    },
-    {
-      label: "Task Management",
-      onClick: () => showSection("taskManagement", user),
-      show: userRole === "admin" || userRole === "manager" || isRootAdmin,
-    },
-    {
-      label: "Inventory Management",
-      onClick: () => showSection("inventory", user),
-      show: userRole === "admin" || userRole === "manager" || isRootAdmin,
-    },
-    {
-      label: "Manage Brands/Categories",
-      onClick: () => showSection("brandCategory", user),
-      show: isRootAdmin,
-    },
-
+    { label: "Dashboard", onClick: () => showSection("customers", user), show: true },
+    { label: "Profile", onClick: () => showSection("userProfile", user), show: true },
+    { label: "Role Management", onClick: () => showSection("roleManagement", user), show: userRole === "admin" || isRootAdmin },
+    { label: "Task Management", onClick: () => showSection("taskManagement", user), show: userRole === "admin" || userRole === "manager" || isRootAdmin },
+    { label: "Inventory Management", onClick: () => showSection("inventory", user), show: userRole === "admin" || userRole === "manager" || isRootAdmin },
+    { label: "Sales", onClick: () => showSection("sales", user), show: userRole === "sales" || userRole === "manager" || userRole === "admin" || isRootAdmin },
+    { label: "Manage Brands/Categories", onClick: () => showSection("brandCategory", user), show: isRootAdmin },
   ];
+
   const sidebarContent = (
     <>
       {/* User info */}
       <div>
         <div className="flex items-center mb-6 space-x-3">
-          <div className="rounded-full bg-blue-500 w-10 h-10 flex items-center justify-center text-lg font-bold">
-            {getInitials(userName || userEmail)}
-          </div>
+          {photoURL ? (
+            <img
+              src={photoURL}
+              alt="User"
+              className="rounded-full w-12 h-12 object-cover border-2 border-blue-500 shadow"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="rounded-full bg-blue-500 w-12 h-12 flex items-center justify-center text-lg font-bold">
+              {getInitials(userName || userEmail)}
+            </div>
+          )}
           <div>
             <div className="font-semibold text-white">{userName}</div>
             <div className="text-xs text-white">{userEmail}</div>
@@ -87,7 +73,7 @@ const Sidebar = ({
               Role: {userRole || "-"}
               {isRootAdmin && " / Root Admin"}
             </div>
-            <div className="text-xs text-gray-300 break-all">ID: {getMaskedId(userId)} </div>
+            <div className="text-xs text-gray-300 break-all">ID: {getMaskedId(userId)}</div>
           </div>
         </div>
         {/* Nav links */}

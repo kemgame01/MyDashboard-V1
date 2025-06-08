@@ -16,46 +16,48 @@ const App = () => {
   const user = useMergedUser();
 
   if (user === undefined) {
-    return <Spinner text="Loading dashboard..." />;
+    return <div className="App"><Spinner text="Loading dashboard..." /></div>;
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<CustomerSearch />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+    <div className="App">
+      <Routes>
+        <Route path="/" element={<CustomerSearch />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
 
-      {/* Protect all /dashboard subroutes */}
-      <Route
-        path="/dashboard/*"
-        element={
-          <PrivateRoute>
-            <Dashboard user={user} />
-          </PrivateRoute>
-        }
-      />
+        {/* Protect all /dashboard subroutes */}
+        <Route
+          path="/dashboard/*"
+          element={
+            <PrivateRoute>
+              <Dashboard user={user} />
+            </PrivateRoute>
+          }
+        />
 
-      {/* Admin/Root Only Routes */}
-      <Route
-        path="/role-management"
-        element={
-          <PrivateRoute role="admin">
-            <RoleManagementSection currentUser={user} />
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/manage-category"
-        element={
-          <PrivateRoute role="admin">
-            <CategoryBrandManager user={user} />
-          </PrivateRoute>
-        }
-      />
+        {/* Admin/Root Only Routes */}
+        <Route
+          path="/role-management"
+          element={
+            <PrivateRoute role="admin">
+              <RoleManagementSection currentUser={user} />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/manage-category"
+          element={
+            <PrivateRoute role="admin">
+              <CategoryBrandManager user={user} />
+            </PrivateRoute>
+          }
+        />
 
-      <Route path="/auditlog" element={<AuditLogPage />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        <Route path="/auditlog" element={<AuditLogPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </div>
   );
 };
 
