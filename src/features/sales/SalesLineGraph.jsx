@@ -7,33 +7,44 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend
+  Legend,
 } from "recharts";
 
+// Icons for clarity
+const chartIcons = {
+  daily: "📅",
+  weekly: "🗓️",
+  monthly: "📈",
+};
+
 /**
- * @param {{
- *   data: Array<{ name: string, income: number }>,
- *   chartView: 'daily'|'weekly'|'monthly',
- *   setChartView: (view: string) => void
- * }}
+ * @param {Object} props
+ * @param {Array<{ name: string, income: number }>} props.data
+ * @param {'daily'|'weekly'|'monthly'} props.chartView
+ * @param {function} props.setChartView
  */
 export default function SalesLineGraph({ data, chartView, setChartView }) {
   return (
     <div className="bg-white rounded-2xl shadow p-6 mb-8">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-[#223163]">Sales Update</h3>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3 className="text-lg font-bold text-[#223163] flex items-center gap-2">
+          Sales Update
+        </h3>
         <div className="flex space-x-2">
-          {['daily', 'weekly', 'monthly'].map(type => (
+          {["daily", "weekly", "monthly"].map((type) => (
             <button
               key={type}
-              className={`px-3 py-1 rounded font-medium border transition 
+              className={`px-3 py-1 rounded font-medium border transition flex items-center gap-1
                 ${chartView === type
                   ? "bg-[#2563eb] text-white border-[#2563eb]"
                   : "bg-white border-gray-300 text-gray-600 hover:bg-gray-100"}
               `}
               onClick={() => setChartView(type)}
+              aria-pressed={chartView === type}
+              tabIndex={0}
             >
-              {type.charAt(0).toUpperCase() + type.slice(1)}
+              <span aria-hidden="true">{chartIcons[type]}</span>
+              <span>{type.charAt(0).toUpperCase() + type.slice(1)}</span>
             </button>
           ))}
         </div>
@@ -42,8 +53,17 @@ export default function SalesLineGraph({ data, chartView, setChartView }) {
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="name" />
-          <YAxis />
-          <Tooltip />
+          <YAxis
+            tickFormatter={(val) =>
+              val > 1000
+                ? `${(val / 1000).toFixed(1)}k`
+                : val.toLocaleString()
+            }
+          />
+          <Tooltip
+            formatter={(val) => `${Number(val).toLocaleString()} ฿`}
+            labelFormatter={(label) => `Date: ${label}`}
+          />
           <Legend />
           <Line
             type="monotone"
@@ -52,11 +72,12 @@ export default function SalesLineGraph({ data, chartView, setChartView }) {
             stroke="#2563eb"
             strokeWidth={3}
             dot={false}
-            fillOpacity={0.2}
-            fill="url(#incomeFill)"
           />
         </LineChart>
       </ResponsiveContainer>
+      {(!data || data.length === 0) && (
+        <div className="text-center text-gray-400 text-sm py-8">No sales data for this range.</div>
+      )}
     </div>
   );
 }

@@ -12,18 +12,24 @@ import {
   getMonthlyData,
 } from "./salesChartHelpers";
 
+// Multi-product form structure
 const initialForm = {
   customer: null,
-  product: null,
-  amount: "",
   channel: "",
-  date: "",
+  datetime: new Date(),
+  products: [
+    {
+      product: null,
+      price: 0,
+      quantity: 1,
+      subtotal: 0,
+    }
+  ],
 };
 
 export default function SalesDashboard({ user }) {
   // --- Hooks for main data ---
   const { sales, loading, addSale, updateSale, totals, monthlyLog } = useSales(user);
-  const inventory = useInventory(user);
   const [customerQuery, setCustomerQuery] = useState("");
   const [productQuery, setProductQuery] = useState("");
   const [customers, customersLoading] = useCustomers(user?.uid, customerQuery);
@@ -50,7 +56,11 @@ export default function SalesDashboard({ user }) {
 
   // --- Modal open/close logic ---
   const openAddModal = () => {
-    setForm(initialForm);
+    setForm({
+      ...initialForm,
+      datetime: new Date(),
+      products: [{ product: null, price: 0, quantity: 1, subtotal: 0 }]
+    });
     setFormError("");
     setEditMode(false);
     setModalOpen(true);
@@ -60,13 +70,22 @@ export default function SalesDashboard({ user }) {
   const openEditModal = (sale) => {
     setForm({
       customer: { id: sale.customerId, name: sale.customerName },
-      product: sale.product ? { id: sale.productId, name: sale.productName }
-        : (Array.isArray(sale.products) && sale.products[0])
-          ? { id: sale.products[0].productId, name: sale.products[0].productName }
-          : null,
-      amount: sale.amount || (Array.isArray(sale.products) && sale.products[0]?.amount) || "",
       channel: sale.channel,
-      date: sale.date?.toDate ? sale.date.toDate().toISOString().slice(0, 10) : (sale.date || ""),
+      datetime: sale.datetime?.toDate ? sale.datetime.toDate()
+        : sale.datetime ? new Date(sale.datetime)
+        : sale.date?.toDate ? sale.date.toDate()
+        : sale.createdAt?.toDate ? sale.createdAt.toDate()
+        : new Date(),
+      products: (sale.products && Array.isArray(sale.products))
+        ? sale.products.map(row => ({
+            product: row.productId && row.productName
+              ? { id: row.productId, name: row.productName }
+              : null,
+            price: Number(row.price),
+            quantity: Number(row.quantity),
+            subtotal: Number(row.subtotal || row.price * row.quantity || 0),
+        }))
+        : [{ product: null, price: 0, quantity: 1, subtotal: 0 }],
     });
     setEditId(sale.id);
     setEditMode(true);
@@ -75,34 +94,71 @@ export default function SalesDashboard({ user }) {
     setProductQuery("");
   };
 
-  // --- Submit logic ---
+  // --- Submit logic: robust validation and clean-up ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError("");
-    if (!form.customer || !form.product || !form.amount || !form.channel || !form.date) {
-      setFormError("Please fill in all fields.");
+
+    // Defensive: filter out empty/blank product rows
+    const cleanProducts = (form.products || []).filter(row =>
+      row.product && row.product.id && row.product.name &&
+      Number(row.quantity) > 0 && Number(row.price) >= 0
+    );
+    if (!form.customer || !form.channel || !form.datetime) {
+      setFormError("Please fill in all required fields.");
       return;
     }
-    setSubmitting(true);
-    const payload = {
+    if (!Array.isArray(cleanProducts) || cleanProducts.length === 0) {
+      setFormError("Please add at least one product.");
+      return;
+    }
+    for (const row of cleanProducts) {
+      if (!row.product || !row.product.id || !row.product.name) {
+        setFormError("Each row needs a selected product.");
+        return;
+      }
+      if (!row.quantity || row.quantity < 1) {
+        setFormError("Quantity must be at least 1 for every product.");
+        return;
+      }
+      if (typeof row.price !== "number" || row.price < 0) {
+        setFormError("Price must be at least 0 for every product.");
+        return;
+      }
+    }
+
+    const totalAmount = cleanProducts.reduce(
+      (sum, row) => sum + (Number(row.subtotal) || row.price * row.quantity || 0), 0
+    );
+
+    const salePayload = {
       customerId: form.customer.id,
       customerName: form.customer.name,
-      productId: form.product.id,
-      productName: form.product.name,
-      amount: Number(form.amount),
       channel: form.channel,
-      date: new Date(form.date),
+      datetime: form.datetime,
+      products: cleanProducts.map(row => ({
+        productId: row.product.id,
+        productName: row.product.name,
+        price: Number(row.price),
+        quantity: Number(row.quantity),
+        subtotal: Number(row.subtotal || row.price * row.quantity || 0),
+      })),
+      totalAmount,
     };
+
+    setSubmitting(true);
     let ok = false;
     if (editMode && editId) {
-      ok = await updateSale(editId, payload);
+      ok = await updateSale(editId, salePayload);
     } else {
-      ok = await addSale(payload);
+      ok = await addSale(salePayload);
     }
     setSubmitting(false);
+
     if (ok) {
-      setForm(initialForm);
+      setForm({ ...initialForm, datetime: new Date(), products: [{ product: null, price: 0, quantity: 1, subtotal: 0 }] });
       setModalOpen(false);
+      setFormError(""); // clear error after success
     } else {
       setFormError("Failed to save sale. Please try again.");
     }
@@ -131,7 +187,6 @@ export default function SalesDashboard({ user }) {
           chartView={chartView}
           setChartView={setChartView}
         />
-        {/* --- Use new RecentSalesSection below --- */}
         <RecentSalesSection user={user} sales={sales} />
       </div>
       <SaleModal
@@ -141,12 +196,12 @@ export default function SalesDashboard({ user }) {
         onSubmit={handleSubmit}
         form={form}
         setForm={setForm}
-        productQuery={productQuery}
-        setProductQuery={setProductQuery}
         customers={customers}
         customersLoading={customersLoading}
         customerQuery={customerQuery}
         setCustomerQuery={setCustomerQuery}
+        productQuery={productQuery}
+        setProductQuery={setProductQuery}
         formError={formError}
         submitting={submitting}
         editMode={editMode}

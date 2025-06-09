@@ -10,11 +10,7 @@ const channelOptions = [
   "Facebook", "LINE", "Shopee", "Lazada", "Other"
 ];
 
-const normalize = str =>
-  (str || "")
-    .toString()
-    .normalize("NFC")
-    .toLowerCase();
+const normalize = str => (str || "").toString().normalize("NFC").toLowerCase();
 
 export default function SaleModal({
   open,
@@ -22,8 +18,6 @@ export default function SaleModal({
   onSubmit,
   form,
   setForm,
-  productQuery,
-  setProductQuery,
   customers,
   customersLoading,
   customerQuery,
@@ -33,19 +27,10 @@ export default function SaleModal({
   editMode,
   user
 }) {
-  // --- Products: get all from inventory
+  // Products: get all from inventory
   const inventory = useInventory(user);
-  const products = inventory.inventory || [];
+  const productsList = inventory.inventory || [];
   const productsLoading = inventory.loading;
-
-  // Product filter logic
-  const filteredProducts = React.useMemo(() => {
-    if (!productQuery) return products;
-    const q = normalize(productQuery);
-    return products.filter(
-      p => normalize(p.name).includes(q)
-    );
-  }, [products, productQuery]);
 
   // Customer filter logic
   const filteredCustomers = React.useMemo(() => {
@@ -58,46 +43,128 @@ export default function SaleModal({
     );
   }, [customers, customerQuery]);
 
-  // Input value logic
-  const customerInputValue = customerQuery || (form.customer && form.customer.name) || "";
-  const productInputValue = productQuery || (form.product && form.product.name) || "";
-
-  // Field handler
+  // Handlers
   const handleField = key => e => setForm(f => ({ ...f, [key]: e.target.value }));
+  const handleDateChange = datetime => setForm(f => ({ ...f, datetime }));
 
-  // --- Date Picker: store as Date object ---
-  const handleDateChange = date => {
-    setForm(f => ({ ...f, date }));
+  // -- Product Row Logic with input value for combobox --
+  // 1. When typing in combobox: update only input (not product object yet)
+  const handleProductInputChange = (idx, input) => {
+    setForm(f => {
+      const newProducts = [...f.products];
+      newProducts[idx] = {
+        ...newProducts[idx],
+        productInput: input,
+        // Only clear product if input doesn't match
+        product:
+          input &&
+          newProducts[idx].product &&
+          newProducts[idx].product.name === input
+            ? newProducts[idx].product
+            : null,
+      };
+      return { ...f, products: newProducts };
+    });
   };
 
-  // Convert form.date to Date (if string), for DatePicker
-  const dateValue = form.date
-    ? (form.date instanceof Date
-        ? form.date
-        : new Date(form.date))
-    : null;
+  // 2. When selecting a product from combobox: update both product and input
+  const handleProductChange = (idx, prod) => {
+    setForm(f => {
+      const newProducts = [...f.products];
+      let price = prod && prod.price ? prod.price : 0;
+      newProducts[idx] = {
+        ...newProducts[idx],
+        product: prod,
+        productInput: prod ? prod.name : "",
+        price,
+        subtotal: price * (newProducts[idx].quantity || 1),
+      };
+      return { ...f, products: newProducts };
+    });
+  };
 
+  const handleQuantityChange = (idx, quantity) => {
+    setForm(f => {
+      const newProducts = [...f.products];
+      const qty = Number(quantity) || 1;
+      const price = newProducts[idx].price || 0;
+      newProducts[idx] = {
+        ...newProducts[idx],
+        quantity: qty,
+        subtotal: qty * price,
+      };
+      return { ...f, products: newProducts };
+    });
+  };
+  const handlePriceChange = (idx, price) => {
+    setForm(f => {
+      const newProducts = [...f.products];
+      const pr = Number(price) || 0;
+      const qty = newProducts[idx].quantity || 1;
+      newProducts[idx] = {
+        ...newProducts[idx],
+        price: pr,
+        subtotal: pr * qty,
+      };
+      return { ...f, products: newProducts };
+    });
+  };
+  const addProductRow = () => {
+    setForm(f => ({
+      ...f,
+      products: [
+        ...f.products,
+        { product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }
+      ]
+    }));
+  };
+  const removeProductRow = idx => {
+    setForm(f => ({
+      ...f,
+      products: f.products.length === 1
+        ? f.products // prevent removal if only one
+        : f.products.filter((_, i) => i !== idx)
+    }));
+  };
+
+  // Compute grand total
+  const grandTotal = (form.products || []).reduce((sum, p) => sum + (p.subtotal || 0), 0);
+
+  // Ensure at least one product row always exists, with input field
+  React.useEffect(() => {
+    if (!form.products || form.products.length === 0) {
+      setForm(f => ({
+        ...f,
+        products: [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }]
+      }));
+    } else {
+      // For backward compatibility: ensure each row has productInput
+      setForm(f => ({
+        ...f,
+        products: f.products.map(row => ({
+          productInput: row.productInput ?? row.product?.name ?? "",
+          ...row,
+        }))
+      }));
+    }
+    // eslint-disable-next-line
+  }, [form.products, setForm]);
+
+  // UI
   return (
     <Modal isOpen={open} onClose={onClose}>
-      <div className="w-full sm:min-w-[340px]">
-        <h2 className="text-xl font-bold mb-6 text-[#223163]">
-          {editMode ? "Edit Sale" : "Add Sale"}
-        </h2>
+      <div className="w-full sm:min-w-[390px]">
+        <h2 className="text-xl font-bold mb-6 text-[#223163]">{editMode ? "Edit Sale" : "Add Sale"}</h2>
         {formError && <div className="mb-2 text-red-500">{formError}</div>}
         <form onSubmit={onSubmit} className="grid grid-cols-1 gap-4">
 
-          {/* Customer Combobox */}
+          {/* Customer */}
           <SalesCombobox
             label="Customer"
             value={form.customer}
             onChange={c => setForm(f => ({ ...f, customer: c }))}
-            inputValue={customerInputValue}
-            onInputChange={val => {
-              setCustomerQuery(val);
-              if (form.customer && val !== form.customer.name) {
-                setForm(f => ({ ...f, customer: null }));
-              }
-            }}
+            inputValue={customerQuery}
+            onInputChange={setCustomerQuery}
             options={filteredCustomers}
             loading={customersLoading}
             placeholder="Type name or phone (min 2 letters)"
@@ -110,47 +177,9 @@ export default function SaleModal({
             )}
           />
 
-          {/* Product Combobox */}
-          <SalesCombobox
-            label="Product"
-            value={form.product}
-            onChange={prod => setForm(f => ({ ...f, product: prod }))}
-            inputValue={productInputValue}
-            onInputChange={val => {
-              setProductQuery(val);
-              if (form.product && val !== form.product.name) {
-                setForm(f => ({ ...f, product: null }));
-              }
-            }}
-            options={filteredProducts}
-            loading={productsLoading}
-            placeholder="Type to search products"
-            displayKey="name"
-            required
-          />
-
-          {/* Amount Field */}
-          <div>
-            <label className="block font-medium text-[#223163] mb-2">
-              Amount (฿) <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number"
-              name="amount"
-              min="1"
-              value={form.amount || ""}
-              onChange={handleField("amount")}
-              required
-              placeholder="Enter amount"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563eb] bg-white text-[#223163] font-semibold placeholder-gray-400"
-            />
-          </div>
-
           {/* Channel */}
           <div>
-            <label className="block text-gray-700 mb-2 font-medium">
-              Channel<span className="text-red-500 ml-1">*</span>
-            </label>
+            <label className="block text-gray-700 mb-2 font-medium">Channel<span className="text-red-500 ml-1">*</span></label>
             <select
               name="channel"
               value={form.channel}
@@ -171,7 +200,7 @@ export default function SaleModal({
               Date & Time <span className="text-red-500">*</span>
             </label>
             <DatePicker
-              selected={dateValue}
+              selected={form.datetime instanceof Date ? form.datetime : new Date(form.datetime)}
               onChange={handleDateChange}
               showTimeSelect
               timeFormat="HH:mm"
@@ -180,14 +209,75 @@ export default function SaleModal({
               placeholderText="Select date and time"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563eb] bg-white text-[#223163] font-semibold placeholder-gray-400"
               popperClassName="z-50"
-              required
-              // Optional: show today/clear buttons
               todayButton="Today"
-              isClearable
+              required
             />
           </div>
 
-          {/* Submit Button */}
+          {/* Product Table */}
+          <div className="border rounded-lg p-2 bg-[#f7fafd]">
+            <div className="grid grid-cols-6 gap-2 text-xs font-semibold text-[#223163] mb-1">
+              <span className="col-span-2">Product</span>
+              <span>Qty</span>
+              <span>Price (฿)</span>
+              <span>Subtotal</span>
+              <span></span>
+            </div>
+            {(form.products || []).map((row, idx) => (
+              <div key={idx} className="grid grid-cols-6 gap-2 items-center mb-1">
+                <div className="col-span-2">
+                  <SalesCombobox
+                    value={row.product}
+                    onChange={prod => handleProductChange(idx, prod)}
+                    inputValue={row.productInput || ""}
+                    onInputChange={val => handleProductInputChange(idx, val)}
+                    options={productsList}
+                    loading={productsLoading}
+                    placeholder="Search product"
+                    displayKey="name"
+                    required
+                  />
+                </div>
+                <input
+                  type="number"
+                  className="px-2 py-1 border rounded text-right w-14"
+                  min={1}
+                  value={row.quantity || 1}
+                  onChange={e => handleQuantityChange(idx, e.target.value)}
+                  required
+                />
+                <input
+                  type="number"
+                  className="px-2 py-1 border rounded text-right w-20"
+                  min={0}
+                  value={row.price || ""}
+                  onChange={e => handlePriceChange(idx, e.target.value)}
+                  required
+                />
+                <div className="text-right font-semibold w-20">{(row.subtotal || 0).toLocaleString()}</div>
+                <button
+                  type="button"
+                  className="text-red-500 px-2 py-1 rounded hover:bg-red-50"
+                  onClick={() => removeProductRow(idx)}
+                  disabled={form.products.length === 1}
+                  tabIndex={-1}
+                  title="Remove"
+                >✕</button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="mt-2 text-[#2563eb] bg-blue-100 hover:bg-blue-200 font-bold py-1 px-3 rounded"
+              onClick={addProductRow}
+              tabIndex={-1}
+            >+ Add Product</button>
+            <div className="flex justify-end font-bold mt-2">
+              <span className="mr-3">Grand Total:</span>
+              <span className="text-[#2563eb]">{grandTotal.toLocaleString()} ฿</span>
+            </div>
+          </div>
+
+          {/* Submit */}
           <button
             type="submit"
             disabled={submitting}

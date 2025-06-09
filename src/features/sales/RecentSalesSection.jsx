@@ -4,8 +4,14 @@ import useCustomers from "../../hooks/useCustomers";
 import { exportCSV } from "../../utils/exportCSV";
 import StyledDatePicker from "../../components/StyledDatePicker";
 
+// Helper to normalize strings for search/filter
+const normalize = str =>
+  (str || "")
+    .toString()
+    .normalize("NFC")
+    .toLowerCase();
+
 export default function RecentSalesSection({ user, sales }) {
-  // Default Start Date: today
   const [dateStart, setDateStart] = useState(new Date());
   const [dateEnd, setDateEnd] = useState(null);
   const [channelFilter, setChannelFilter] = useState("");
@@ -23,17 +29,20 @@ export default function RecentSalesSection({ user, sales }) {
   ]);
 
   const productOptions = useMemo(() => {
+    // List all unique product names from inventory
     const all = (inventory.inventory || []).map(p => p.name).filter(Boolean);
     return Array.from(new Set(all));
   }, [inventory.inventory]);
 
   const customerOptions = useMemo(() => {
+    // List all unique customer names from customers
     const all = (customers || []).map(c => c.name).filter(Boolean);
     return Array.from(new Set(all));
   }, [customers]);
 
   const channelOptions = ["", "Facebook", "LINE", "Shopee", "Lazada", "Other"];
 
+  // --- Filtering logic for MULTI-PRODUCT SALES ---
   const filteredSales = useMemo(() => {
     return (sales || []).filter(sale => {
       let date = sale.date?.toDate ? sale.date.toDate() : new Date(sale.date);
@@ -45,44 +54,90 @@ export default function RecentSalesSection({ user, sales }) {
       // Channel
       if (channelFilter && sale.channel !== channelFilter) return false;
 
-      // Product
-      let prodName = sale.productName || (sale.products?.[0]?.productName) || "";
-      if (productFilter && prodName !== productFilter) return false;
+      // Multi-product: match if any product in sale matches the filter
+      let productNames = [];
+      if (Array.isArray(sale.products) && sale.products.length > 0) {
+        productNames = sale.products.map(p => p.productName || p.name || "");
+      } else {
+        productNames = [sale.productName || ""];
+      }
+      if (productFilter && !productNames.some(name => name === productFilter)) return false;
 
-      // Customer
+      // Customer filter (strict match)
       if (customerFilter && sale.customerName !== customerFilter) return false;
 
-      // Search (case-insensitive)
+      // Search: checks all products and customer/channel (case-insensitive)
       if (search) {
-        const searchLower = search.toLowerCase();
+        const s = normalize(search);
         const fields = [
-          sale.customerName, prodName, sale.channel,
-          sale.amount, date.toLocaleDateString("en-GB")
+          sale.customerName,
+          sale.channel,
+          ...productNames,
+          String(sale.totalAmount || sale.amount || 0),
+          date.toLocaleDateString("en-GB")
         ];
-        if (!fields.some(f => (f || "").toString().toLowerCase().includes(searchLower))) return false;
+        if (!fields.some(f => normalize(f).includes(s))) return false;
       }
       return true;
     });
   }, [sales, dateStart, dateEnd, channelFilter, productFilter, customerFilter, search]);
 
+  // --- Pagination ---
   const pagedSales = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
     return filteredSales.slice(start, start + rowsPerPage);
   }, [filteredSales, page]);
 
+  // --- Multi-product total ---
   const totalAmount = useMemo(
-    () => filteredSales.reduce((sum, s) => sum + Number(s.amount || (s.products?.[0]?.amount) || 0), 0),
+    () => filteredSales.reduce((sum, sale) => {
+      if (Array.isArray(sale.products) && sale.products.length > 0) {
+        return sum + sale.products.reduce((pSum, p) => pSum + Number(p.subtotal || 0), 0);
+      }
+      return sum + Number(sale.totalAmount || sale.amount || 0);
+    }, 0),
     [filteredSales]
   );
 
+  // --- Export logic ---
   const handleExport = () => {
     if (!filteredSales.length) {
       alert("No data to export!");
       return;
     }
-    exportCSV("sales-report.csv", filteredSales);
+    // For multi-product: flatten each sale into a row per product
+    const exportRows = [];
+    filteredSales.forEach(sale => {
+      if (Array.isArray(sale.products) && sale.products.length > 0) {
+        sale.products.forEach(prod => {
+          exportRows.push({
+            SaleID: sale.id,
+            Date: sale.date?.toDate ? sale.date.toDate().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "",
+            Customer: sale.customerName,
+            Product: prod.productName,
+            Quantity: prod.quantity,
+            Price: prod.price,
+            Subtotal: prod.subtotal,
+            Channel: sale.channel,
+          });
+        });
+      } else {
+        exportRows.push({
+          SaleID: sale.id,
+          Date: sale.date?.toDate ? sale.date.toDate().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" }) : "",
+          Customer: sale.customerName,
+          Product: sale.productName,
+          Quantity: 1,
+          Price: sale.amount,
+          Subtotal: sale.amount,
+          Channel: sale.channel,
+        });
+      }
+    });
+    exportCSV("sales-report.csv", exportRows);
   };
 
+  // --- Helper: Local Timezone Display (GMT+7) ---
   const formatTime = date => {
     try {
       const d = date?.toDate ? date.toDate() : new Date(date);
@@ -173,23 +228,41 @@ export default function RecentSalesSection({ user, sales }) {
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Time</th>
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Customer</th>
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Product</th>
+            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Qty</th>
+            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Price</th>
+            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Subtotal</th>
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Channel</th>
-            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Amount (฿)</th>
           </tr>
         </thead>
         <tbody>
           {pagedSales.length === 0 ? (
             <tr>
-              <td colSpan={6} className="p-4 text-center text-gray-400">No sales found.</td>
+              <td colSpan={7} className="p-4 text-center text-gray-400">No sales found.</td>
             </tr>
           ) : pagedSales.map(sale => (
-            <tr key={sale.id} className="border-b hover:bg-[#F5F7FB] transition">
-              <td className="p-2 sm:p-3">{formatTime(sale.date)}</td>
-              <td className="p-2 sm:p-3">{sale.customerName || "-"}</td>
-              <td className="p-2 sm:p-3">{sale.productName || (sale.products?.[0]?.productName) || "-"}</td>
-              <td className="p-2 sm:p-3">{sale.channel}</td>
-              <td className="p-2 sm:p-3 text-right font-bold">{Number(sale.amount || (sale.products?.[0]?.amount) || 0).toLocaleString()}</td>
-            </tr>
+            Array.isArray(sale.products) && sale.products.length > 0 ? (
+              sale.products.map((prod, idx) => (
+                <tr key={sale.id + "-" + idx} className="border-b hover:bg-[#F5F7FB] transition">
+                  <td className="p-2 sm:p-3">{formatTime(sale.date)}</td>
+                  <td className="p-2 sm:p-3">{sale.customerName || "-"}</td>
+                  <td className="p-2 sm:p-3">{prod.productName || "-"}</td>
+                  <td className="p-2 sm:p-3 text-right">{prod.quantity || 1}</td>
+                  <td className="p-2 sm:p-3 text-right">{Number(prod.price || 0).toLocaleString()}</td>
+                  <td className="p-2 sm:p-3 text-right font-bold">{Number(prod.subtotal || 0).toLocaleString()}</td>
+                  <td className="p-2 sm:p-3">{sale.channel}</td>
+                </tr>
+              ))
+            ) : (
+              <tr key={sale.id} className="border-b hover:bg-[#F5F7FB] transition">
+                <td className="p-2 sm:p-3">{formatTime(sale.date)}</td>
+                <td className="p-2 sm:p-3">{sale.customerName || "-"}</td>
+                <td className="p-2 sm:p-3">{sale.productName || "-"}</td>
+                <td className="p-2 sm:p-3 text-right">1</td>
+                <td className="p-2 sm:p-3 text-right">{Number(sale.amount || 0).toLocaleString()}</td>
+                <td className="p-2 sm:p-3 text-right font-bold">{Number(sale.amount || 0).toLocaleString()}</td>
+                <td className="p-2 sm:p-3">{sale.channel}</td>
+              </tr>
+            )
           ))}
         </tbody>
       </table>

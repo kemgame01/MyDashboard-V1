@@ -1,7 +1,13 @@
 import React from 'react';
-import Sidebar from './Sidebar'; // Adjust the path if needed
+import Sidebar from '../features/layout/Sidebar';
 
-export default function Layout({ user, activeSection, handleLogout, showSection, children }) {
+export default function Layout({
+  user,
+  activeSection,
+  handleLogout,
+  showSection,
+  children,
+}) {
   return (
     <div className="App flex min-h-screen bg-[#f5f7fb]">
       <Sidebar
