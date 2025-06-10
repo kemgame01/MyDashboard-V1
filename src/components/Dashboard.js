@@ -1,51 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../firebase';
-import Layout from './Layout'; // Import your new Layout!
-import CustomerSection from './CustomerSection';
+import { auth } from '../firebase';
+import { useMergedUser } from '../hooks/useMergedUser'; // Import the hook
+import Layout from './Layout';
+import CustomerSection from '../features/customers/CustomerSection'; // Corrected import path
 import RoleManagementSection from '../features/users/RoleManagementSection';
 import TaskManagementSection from './TaskManagementSection';
 import CategoryBrandManager from './CategoryBrandManager';
 import InventoryDashboard from '../features/inventory/InventoryDashboard';
 import UserProfile from '../features/userprofile/UserProfile';
 import SalesDashboard from '../features/sales/SalesDashboard';
+import Spinner from './Spinner'; // Import the spinner for a better loading state
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('customers');
-  const [user, setUser] = useState(undefined); // undefined = loading, null = not logged in
+  const user = useMergedUser(); // Use the hook to get the complete user object
 
+  // This effect now only handles remembering the active section
   useEffect(() => {
     const savedSection = localStorage.getItem('activeSection');
-    if (savedSection) setActiveSection(savedSection);
+    if (savedSection) {
+      setActiveSection(savedSection);
+    }
+  }, []);
 
-    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
-      if (authUser) {
-        const userDocRef = doc(db, 'users', authUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          setUser({ ...authUser, ...userDocSnap.data() });
-        } else {
-          setUser(null);
-          handleLogout();
-        }
-      } else {
-        setUser(null);
-        navigate('/', { replace: true });
-      }
-    });
-
-    return () => unsubscribe();
-    // eslint-disable-next-line
-  }, [navigate]);
+  // This effect handles redirecting if the user logs out
+  useEffect(() => {
+    if (user === null) { // user is loaded but not logged in
+      navigate('/login', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleLogout = async () => {
     try {
       await auth.signOut();
-    } finally {
-      navigate('/', { replace: true });
+      // The useEffect above will handle the navigation
+    } catch (error) {
+      console.error("Error signing out: ", error);
     }
   };
 
@@ -54,19 +46,14 @@ const Dashboard = () => {
     localStorage.setItem('activeSection', section);
   };
 
+  // Show a spinner while the user object is being fetched
   if (user === undefined) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-[#f5f7fb] text-gray-400">
-        Loading user...
-      </div>
-    );
+    return <Spinner text="Loading Dashboard..." />;
   }
+
+  // This should not happen if the useEffect redirects, but as a fallback
   if (!user) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-[#f5f7fb] text-red-600">
-        User not found or not authorized.
-      </div>
-    );
+    return null; 
   }
 
   const isRootAdmin = user.isRootAdmin === true;
@@ -96,7 +83,7 @@ const Dashboard = () => {
         <CategoryBrandManager user={user} />
       )}
       {activeSection === 'userProfile' && (
-        <UserProfile currentUser={user} />
+        <UserProfile targetUserId={user.uid} />
       )}
     </Layout>
   );

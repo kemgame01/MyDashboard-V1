@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useEffect } from "react";
 import Modal from "../../components/Modal";
 import SalesCombobox from "../../components/SalesCombobox";
 import InputField from "../../components/InputField";
 import { useInventory } from "../../hooks/useInventory";
 import DatePicker from "react-datepicker";
+import SaleProductTable from "./SaleProductTable"; // <<-- new import
 import "react-datepicker/dist/react-datepicker.css";
 
 const channelOptions = [
@@ -27,12 +28,11 @@ export default function SaleModal({
   editMode,
   user
 }) {
-  // Products: get all from inventory
   const inventory = useInventory(user);
   const productsList = inventory.inventory || [];
   const productsLoading = inventory.loading;
 
-  // Customer filter logic
+  // Filter customers for combobox
   const filteredCustomers = React.useMemo(() => {
     if (!Array.isArray(customers) || !customerQuery || customerQuery.length < 2) return [];
     const q = normalize(customerQuery);
@@ -47,15 +47,13 @@ export default function SaleModal({
   const handleField = key => e => setForm(f => ({ ...f, [key]: e.target.value }));
   const handleDateChange = datetime => setForm(f => ({ ...f, datetime }));
 
-  // -- Product Row Logic with input value for combobox --
-  // 1. When typing in combobox: update only input (not product object yet)
+  // Product row logic
   const handleProductInputChange = (idx, input) => {
     setForm(f => {
       const newProducts = [...f.products];
       newProducts[idx] = {
         ...newProducts[idx],
         productInput: input,
-        // Only clear product if input doesn't match
         product:
           input &&
           newProducts[idx].product &&
@@ -67,7 +65,6 @@ export default function SaleModal({
     });
   };
 
-  // 2. When selecting a product from combobox: update both product and input
   const handleProductChange = (idx, prod) => {
     setForm(f => {
       const newProducts = [...f.products];
@@ -127,30 +124,24 @@ export default function SaleModal({
     }));
   };
 
-  // Compute grand total
-  const grandTotal = (form.products || []).reduce((sum, p) => sum + (p.subtotal || 0), 0);
-
-  // Ensure at least one product row always exists, with input field
-  React.useEffect(() => {
-    if (!form.products || form.products.length === 0) {
-      setForm(f => ({
-        ...f,
-        products: [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }]
-      }));
-    } else {
-      // For backward compatibility: ensure each row has productInput
-      setForm(f => ({
-        ...f,
-        products: f.products.map(row => ({
+  // --- FIX: Only ensure a product row exists when modal opens, not every products update
+  useEffect(() => {
+    if (open) {
+      setForm(f => {
+        let prods = Array.isArray(f.products) ? f.products : [];
+        prods = prods.map(row => ({
           productInput: row.productInput ?? row.product?.name ?? "",
           ...row,
-        }))
-      }));
+        }));
+        if (prods.length === 0) {
+          prods = [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }];
+        }
+        return { ...f, products: prods };
+      });
     }
     // eslint-disable-next-line
-  }, [form.products, setForm]);
+  }, [open]);
 
-  // UI
   return (
     <Modal isOpen={open} onClose={onClose}>
       <div className="w-full sm:min-w-[390px]">
@@ -214,68 +205,18 @@ export default function SaleModal({
             />
           </div>
 
-          {/* Product Table */}
-          <div className="border rounded-lg p-2 bg-[#f7fafd]">
-            <div className="grid grid-cols-6 gap-2 text-xs font-semibold text-[#223163] mb-1">
-              <span className="col-span-2">Product</span>
-              <span>Qty</span>
-              <span>Price (฿)</span>
-              <span>Subtotal</span>
-              <span></span>
-            </div>
-            {(form.products || []).map((row, idx) => (
-              <div key={idx} className="grid grid-cols-6 gap-2 items-center mb-1">
-                <div className="col-span-2">
-                  <SalesCombobox
-                    value={row.product}
-                    onChange={prod => handleProductChange(idx, prod)}
-                    inputValue={row.productInput || ""}
-                    onInputChange={val => handleProductInputChange(idx, val)}
-                    options={productsList}
-                    loading={productsLoading}
-                    placeholder="Search product"
-                    displayKey="name"
-                    required
-                  />
-                </div>
-                <input
-                  type="number"
-                  className="px-2 py-1 border rounded text-right w-14"
-                  min={1}
-                  value={row.quantity || 1}
-                  onChange={e => handleQuantityChange(idx, e.target.value)}
-                  required
-                />
-                <input
-                  type="number"
-                  className="px-2 py-1 border rounded text-right w-20"
-                  min={0}
-                  value={row.price || ""}
-                  onChange={e => handlePriceChange(idx, e.target.value)}
-                  required
-                />
-                <div className="text-right font-semibold w-20">{(row.subtotal || 0).toLocaleString()}</div>
-                <button
-                  type="button"
-                  className="text-red-500 px-2 py-1 rounded hover:bg-red-50"
-                  onClick={() => removeProductRow(idx)}
-                  disabled={form.products.length === 1}
-                  tabIndex={-1}
-                  title="Remove"
-                >✕</button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="mt-2 text-[#2563eb] bg-blue-100 hover:bg-blue-200 font-bold py-1 px-3 rounded"
-              onClick={addProductRow}
-              tabIndex={-1}
-            >+ Add Product</button>
-            <div className="flex justify-end font-bold mt-2">
-              <span className="mr-3">Grand Total:</span>
-              <span className="text-[#2563eb]">{grandTotal.toLocaleString()} ฿</span>
-            </div>
-          </div>
+          {/* Product Table (modularized!) */}
+          <SaleProductTable
+            products={form.products || []}
+            productsList={productsList}
+            productsLoading={productsLoading}
+            onProductChange={handleProductChange}
+            onProductInputChange={handleProductInputChange}
+            onQuantityChange={handleQuantityChange}
+            onPriceChange={handlePriceChange}
+            onAddRow={addProductRow}
+            onRemoveRow={removeProductRow}
+          />
 
           {/* Submit */}
           <button
