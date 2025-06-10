@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   collection, query, orderBy, limit, startAfter, endBefore, limitToLast,
   getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
-  collectionGroup
+  collectionGroup, where, and
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import CustomerList from './CustomerList';
 import CustomerForm from './CustomerForm';
+import CustomerFilters from './CustomerFilters';
 import TagChangeConfirmModal from './TagChangeConfirmModal';
 import { exportCSV } from '../../utils/exportCSV';
 import CustomerControlsDisclosure from "./CustomerControlsDisclosure";
@@ -28,25 +29,124 @@ const CustomerSection = ({ userId, user }) => {
   const [firstVisible, setFirstVisible] = useState(null);
   const [lastVisible, setLastVisible] = useState(null);
   const [isLastPage, setIsLastPage] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  
+  // Advanced filters state
+  const [filters, setFilters] = useState({
+    tag: 'all',
+    dateFrom: null,
+    dateTo: null,
+    hasPhone: 'all',
+    hasAddress: 'all',
+    searchText: ''
+  });
+  
+  const [activeFilters, setActiveFilters] = useState({});
   
   const isAdmin = useMemo(() => user?.role === 'admin' || user?.isRootAdmin === true, [user]);
+  
+  // Get unique tags from customers
+  const availableTags = useMemo(() => {
+    const tags = new Set(['New', 'Active', 'Inactive', 'VIP']); // Default tags
+    customers.forEach(customer => {
+      if (customer.tags && customer.tags.length > 0) {
+        customer.tags.forEach(tag => tags.add(tag));
+      }
+    });
+    return Array.from(tags);
+  }, [customers]);
+
+  // Build query with filters
+  const buildQueryWithFilters = useCallback((baseQuery) => {
+    let conditions = [];
+    
+    // Tag filter
+    if (activeFilters.tag && activeFilters.tag !== 'all') {
+      conditions.push(where('tags', 'array-contains', activeFilters.tag));
+    }
+    
+    // Date range filters
+    if (activeFilters.dateFrom) {
+      conditions.push(where('createdAt', '>=', new Date(activeFilters.dateFrom)));
+    }
+    if (activeFilters.dateTo) {
+      const endDate = new Date(activeFilters.dateTo);
+      endDate.setHours(23, 59, 59, 999);
+      conditions.push(where('createdAt', '<=', endDate));
+    }
+    
+    // For complex queries with multiple conditions, we need composite indexes
+    // For now, we'll apply filters client-side after fetching
+    return baseQuery;
+  }, [activeFilters]);
 
   const customersQuery = useMemo(() => {
+    let baseQuery;
     if (isAdmin) {
-      return query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'));
+      baseQuery = query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'));
+    } else if (userId) {
+      baseQuery = query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'));
+    } else {
+      return null;
     }
-    if (userId) {
-      return query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'));
-    }
-    return null;
-  }, [userId, isAdmin]);
+    
+    return buildQueryWithFilters(baseQuery);
+  }, [userId, isAdmin, buildQueryWithFilters]);
 
   const mapCustomerData = (doc) => ({
     id: doc.id,
     ...doc.data(),
-    // For admins, we MUST know the parent user's ID to perform updates/deletes
     ownerId: doc.ref.parent.parent.id,
   });
+  
+  // Client-side filtering function
+  const applyClientSideFilters = useCallback((customers) => {
+    return customers.filter(customer => {
+      // Tag filter
+      if (activeFilters.tag && activeFilters.tag !== 'all') {
+        if (!customer.tags || !customer.tags.includes(activeFilters.tag)) {
+          return false;
+        }
+      }
+      
+      // Date filters
+      if (activeFilters.dateFrom) {
+        const customerDate = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
+        if (customerDate < new Date(activeFilters.dateFrom)) return false;
+      }
+      if (activeFilters.dateTo) {
+        const customerDate = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
+        const endDate = new Date(activeFilters.dateTo);
+        endDate.setHours(23, 59, 59, 999);
+        if (customerDate > endDate) return false;
+      }
+      
+      // Has phone filter
+      if (activeFilters.hasPhone === 'yes' && !customer.phoneNumber) return false;
+      if (activeFilters.hasPhone === 'no' && customer.phoneNumber) return false;
+      
+      // Has address filter
+      if (activeFilters.hasAddress === 'yes' && !customer.address) return false;
+      if (activeFilters.hasAddress === 'no' && customer.address) return false;
+      
+      // Text search
+      if (activeFilters.searchText) {
+        const searchLower = activeFilters.searchText.toLowerCase();
+        const searchableFields = [
+          customer.firstName,
+          customer.lastName,
+          customer.email,
+          customer.phoneNumber,
+          customer.company,
+          customer.address
+        ].filter(Boolean).join(' ').toLowerCase();
+        
+        if (!searchableFields.includes(searchLower)) return false;
+      }
+      
+      return true;
+    });
+  }, [activeFilters]);
 
   const loadInitialPage = useCallback(() => {
     if (!customersQuery) return;
@@ -55,7 +155,9 @@ const CustomerSection = ({ userId, user }) => {
     
     getDocs(firstPageQuery).then(snapshot => {
       if (!snapshot.empty) {
-        setCustomers(snapshot.docs.map(mapCustomerData));
+        const allCustomers = snapshot.docs.map(mapCustomerData);
+        const filteredCustomers = applyClientSideFilters(allCustomers);
+        setCustomers(filteredCustomers);
         setFirstVisible(snapshot.docs[0]);
         setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
         setIsLastPage(snapshot.docs.length < PAGE_SIZE);
@@ -65,10 +167,10 @@ const CustomerSection = ({ userId, user }) => {
         setIsLastPage(true);
       }
     }).catch(err => {
-      console.error("Error fetching initial page (Admins: Have you created the Firestore index?): ", err);
-      setFormError("Failed to load customers. Admins may need to create a Firestore index.");
+      console.error("Error fetching initial page: ", err);
+      setFormError("Failed to load customers.");
     }).finally(() => setLoading(false));
-  }, [customersQuery]);
+  }, [customersQuery, applyClientSideFilters]);
 
   useEffect(() => {
     if (customersQuery) {
@@ -88,7 +190,9 @@ const CustomerSection = ({ userId, user }) => {
     try {
         const snapshot = await getDocs(nextPageQuery);
         if(!snapshot.empty) {
-            setCustomers(snapshot.docs.map(mapCustomerData));
+            const allCustomers = snapshot.docs.map(mapCustomerData);
+            const filteredCustomers = applyClientSideFilters(allCustomers);
+            setCustomers(filteredCustomers);
             setFirstVisible(snapshot.docs[0]);
             setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
             setIsLastPage(snapshot.docs.length < PAGE_SIZE);
@@ -105,7 +209,9 @@ const CustomerSection = ({ userId, user }) => {
     try {
         const snapshot = await getDocs(prevPageQuery);
         if(!snapshot.empty) {
-            setCustomers(snapshot.docs.map(mapCustomerData));
+            const allCustomers = snapshot.docs.map(mapCustomerData);
+            const filteredCustomers = applyClientSideFilters(allCustomers);
+            setCustomers(filteredCustomers);
             setFirstVisible(snapshot.docs[0]);
             setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
             setIsLastPage(false);
@@ -113,6 +219,29 @@ const CustomerSection = ({ userId, user }) => {
         }
     } catch(err) { console.error("Error fetching previous page: ", err); }
     finally { setLoading(false); }
+  };
+  
+  // Apply filters
+  const handleApplyFilters = () => {
+    setActiveFilters({ ...filters });
+    setPage(1);
+    loadInitialPage();
+  };
+  
+  // Reset filters
+  const handleResetFilters = () => {
+    const resetFilters = {
+      tag: 'all',
+      dateFrom: null,
+      dateTo: null,
+      hasPhone: 'all',
+      hasAddress: 'all',
+      searchText: ''
+    };
+    setFilters(resetFilters);
+    setActiveFilters({});
+    setPage(1);
+    loadInitialPage();
   };
 
   const handleInitiateTagChange = (customerId, newTag, currentTag) => {
@@ -213,14 +342,45 @@ const CustomerSection = ({ userId, user }) => {
     <div className="p-4 sm:p-6">
       <TagChangeConfirmModal tagChangeInfo={tagChangeInfo} onConfirm={handleConfirmTagChange} onCancel={handleCancelTagChange} />
       <h2 className="text-3xl font-bold text-gray-800 mb-6">Customers</h2>
+      
       <div className="mb-4">
         <CustomerControlsDisclosure>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-            <input id="customer-search" type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search current page..." className="px-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <div className="flex justify-start md:justify-end">
-              <button onClick={() => setIsAdding(!isAdding)} type="button" className="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg hover:bg-blue-700 transition shadow-sm">{isAdding ? 'Close Form' : 'Add New Customer'}</button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center mb-4">
+            <input 
+              id="customer-search" 
+              type="text" 
+              value={searchTerm} 
+              onChange={e => setSearchTerm(e.target.value)} 
+              placeholder="Quick search current page..." 
+              className="px-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500" 
+            />
+            <div className="flex justify-start md:justify-end gap-2">
+              <button 
+                onClick={() => setShowFilters(!showFilters)} 
+                type="button" 
+                className="bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-gray-700 transition shadow-sm"
+              >
+                {showFilters ? 'Hide Filters' : 'Show Filters'}
+              </button>
+              <button 
+                onClick={() => setIsAdding(!isAdding)} 
+                type="button" 
+                className="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg hover:bg-blue-700 transition shadow-sm"
+              >
+                {isAdding ? 'Close Form' : 'Add New Customer'}
+              </button>
             </div>
           </div>
+          
+          {showFilters && (
+            <CustomerFilters
+              filters={filters}
+              setFilters={setFilters}
+              tags={availableTags}
+              onApplyFilters={handleApplyFilters}
+              onResetFilters={handleResetFilters}
+            />
+          )}
         </CustomerControlsDisclosure>
       </div>
 
@@ -239,14 +399,22 @@ const CustomerSection = ({ userId, user }) => {
             handleBulkTag={handleBulkTag}
             handleInitiateTagChange={handleInitiateTagChange} 
           />
-          <div className="flex justify-end items-center mt-4 gap-4">
-            <button onClick={handlePrevPage} disabled={page <= 1 || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
-              <ChevronLeft className="w-4 h-4" /> {loading && page > 1 ? 'Loading...' : 'Previous'}
-            </button>
-            <span className="text-sm text-gray-700 font-medium">Page {page}</span>
-            <button onClick={handleNextPage} disabled={isLastPage || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
-              {loading && page === 1 ? 'Loading...' : 'Next'} <ChevronRight className="w-4 h-4" />
-            </button>
+          <div className="flex justify-between items-center mt-4">
+            <div className="text-sm text-gray-600">
+              {Object.keys(activeFilters).length > 0 && (
+                <span className="font-medium">Filters applied • </span>
+              )}
+              Showing {filteredCustomers.length} customers
+            </div>
+            <div className="flex items-center gap-4">
+              <button onClick={handlePrevPage} disabled={page <= 1 || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
+                <ChevronLeft className="w-4 h-4" /> {loading && page > 1 ? 'Loading...' : 'Previous'}
+              </button>
+              <span className="text-sm text-gray-700 font-medium">Page {page}</span>
+              <button onClick={handleNextPage} disabled={isLastPage || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
+                {loading && page === 1 ? 'Loading...' : 'Next'} <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </>
       )}
