@@ -12,10 +12,11 @@ import TagChangeConfirmModal from './TagChangeConfirmModal';
 import { exportCSV } from '../../utils/exportCSV';
 import CustomerControlsDisclosure from "./CustomerControlsDisclosure";
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { filterByShopAccess, addShopFilter } from '../../utils/shopPermissions';
 
 const PAGE_SIZE = 15;
 
-const CustomerSection = ({ userId, user }) => { 
+const CustomerSection = ({ userId, user, shopContext }) => { 
   const [customers, setCustomers] = useState([]);
   const [trackingCompanies, setTrackingCompanies] = useState([]);
   const [newCustomer, setNewCustomer] = useState({});
@@ -75,10 +76,15 @@ const CustomerSection = ({ userId, user }) => {
       conditions.push(where('createdAt', '<=', endDate));
     }
     
+    // Shop-specific filter for non-admins
+    if (!isAdmin && shopContext?.shopId) {
+      conditions.push(where('shopId', '==', shopContext.shopId));
+    }
+    
     // For complex queries with multiple conditions, we need composite indexes
     // For now, we'll apply filters client-side after fetching
     return baseQuery;
-  }, [activeFilters]);
+  }, [activeFilters, isAdmin, shopContext]);
 
   const customersQuery = useMemo(() => {
     let baseQuery;
@@ -90,8 +96,13 @@ const CustomerSection = ({ userId, user }) => {
       return null;
     }
     
+    // Apply shop filter if needed
+    if (!isAdmin && shopContext?.shopId) {
+      baseQuery = addShopFilter(baseQuery, user, 'shopId') || baseQuery;
+    }
+    
     return buildQueryWithFilters(baseQuery);
-  }, [userId, isAdmin, buildQueryWithFilters]);
+  }, [userId, isAdmin, buildQueryWithFilters, shopContext, user]);
 
   const mapCustomerData = (doc) => ({
     id: doc.id,
@@ -101,7 +112,14 @@ const CustomerSection = ({ userId, user }) => {
   
   // Client-side filtering function
   const applyClientSideFilters = useCallback((customers) => {
-    return customers.filter(customer => {
+    let filtered = customers;
+    
+    // Apply shop-based filtering for non-admins
+    if (!isAdmin) {
+      filtered = filterByShopAccess(filtered, user, 'shopId');
+    }
+    
+    return filtered.filter(customer => {
       // Tag filter
       if (activeFilters.tag && activeFilters.tag !== 'all') {
         if (!customer.tags || !customer.tags.includes(activeFilters.tag)) {
@@ -146,7 +164,7 @@ const CustomerSection = ({ userId, user }) => {
       
       return true;
     });
-  }, [activeFilters]);
+  }, [activeFilters, isAdmin, user]);
 
   const loadInitialPage = useCallback(() => {
     if (!customersQuery) return;
@@ -182,6 +200,13 @@ const CustomerSection = ({ userId, user }) => {
     };
     fetchTrackingCompanies();
   }, [customersQuery, loadInitialPage]);
+
+  // Reload when shop context changes
+  useEffect(() => {
+    if (shopContext) {
+      loadInitialPage();
+    }
+  }, [shopContext, loadInitialPage]);
 
   const handleNextPage = async () => {
     if (!lastVisible || !customersQuery) return;
@@ -272,18 +297,44 @@ const CustomerSection = ({ userId, user }) => {
   
   const handleAddCustomerSubmit = async (e) => {
     e.preventDefault();
-    if (!newCustomer.firstName || !newCustomer.email) { setFormError('Name and email required.'); return; }
+    if (!newCustomer.firstName || !newCustomer.email) { 
+      setFormError('Name and email required.'); 
+      return; 
+    }
+    
     try {
-      await addDoc(collection(db, 'users', userId, 'customers'), { ...newCustomer, createdAt: serverTimestamp(), tags: ['New'] });
-      setIsAdding(false); setNewCustomer({}); loadInitialPage();
-    } catch (e) { setFormError('Error adding customer.') }
+      // Add shop context to new customer if available
+      const customerData = { 
+        ...newCustomer, 
+        createdAt: serverTimestamp(), 
+        tags: ['New'],
+        shopId: shopContext?.shopId || null // Associate with current shop
+      };
+      
+      await addDoc(collection(db, 'users', userId, 'customers'), customerData);
+      setIsAdding(false); 
+      setNewCustomer({}); 
+      loadInitialPage();
+    } catch (e) { 
+      setFormError('Error adding customer.') 
+    }
   };
 
   const handleQuickAdd = async (data) => {
     try {
-      await addDoc(collection(db, 'users', userId, 'customers'), { ...data, createdAt: serverTimestamp(), tags: ['New'] });
+      // Add shop context to quick add customer if available
+      const customerData = { 
+        ...data, 
+        createdAt: serverTimestamp(), 
+        tags: ['New'],
+        shopId: shopContext?.shopId || null // Associate with current shop
+      };
+      
+      await addDoc(collection(db, 'users', userId, 'customers'), customerData);
       loadInitialPage();
-    } catch (e) { setFormError('Error adding customer.') }
+    } catch (e) { 
+      setFormError('Error adding customer.') 
+    }
   };
 
   const handleDeleteClick = async (ids) => {
@@ -308,10 +359,21 @@ const CustomerSection = ({ userId, user }) => {
   const handleSaveClick = async (cust) => {
     const { id, ownerId, ...dataToSave } = cust;
     const owner = isAdmin && ownerId ? ownerId : userId;
+    
+    // Preserve shop association when saving
+    if (shopContext?.shopId && !dataToSave.shopId) {
+      dataToSave.shopId = shopContext.shopId;
+    }
+    
     try {
-      await updateDoc(doc(db, 'users', owner, 'customers', id), { ...dataToSave, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, 'users', owner, 'customers', id), { 
+        ...dataToSave, 
+        updatedAt: serverTimestamp() 
+      });
       setCustomers(p => p.map(c => c.id === id ? cust : c));
-    } catch (e) { setFormError('Error saving.'); }
+    } catch (e) { 
+      setFormError('Error saving.'); 
+    }
   };
 
   const handleBulkTag = async(ids, tag) => {
@@ -341,7 +403,15 @@ const CustomerSection = ({ userId, user }) => {
   return (
     <div className="p-4 sm:p-6">
       <TagChangeConfirmModal tagChangeInfo={tagChangeInfo} onConfirm={handleConfirmTagChange} onCancel={handleCancelTagChange} />
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Customers</h2>
+      
+      <div className="mb-6">
+        <h2 className="text-3xl font-bold text-gray-800 mb-2">Customers</h2>
+        {shopContext && (
+          <p className="text-gray-600 text-sm">
+            Managing customers for: <span className="font-semibold">{shopContext.shopName}</span>
+          </p>
+        )}
+      </div>
       
       <div className="mb-4">
         <CustomerControlsDisclosure>
@@ -384,9 +454,22 @@ const CustomerSection = ({ userId, user }) => {
         </CustomerControlsDisclosure>
       </div>
 
-      {isAdding && (<CustomerForm newCustomer={newCustomer} trackingCompanies={trackingCompanies} handleNewCustomerChange={e => setNewCustomer(prev => ({ ...prev, [e.target.name]: e.target.value }))} handleAddCustomerSubmit={handleAddCustomerSubmit} formError={formError}/>)}
+      {isAdding && (
+        <CustomerForm 
+          newCustomer={newCustomer} 
+          trackingCompanies={trackingCompanies} 
+          handleNewCustomerChange={e => setNewCustomer(prev => ({ 
+            ...prev, 
+            [e.target.name]: e.target.value 
+          }))} 
+          handleAddCustomerSubmit={handleAddCustomerSubmit} 
+          formError={formError}
+        />
+      )}
 
-      {loading && customers.length === 0 ? <div className="text-center py-10">Loading customers...</div> : (
+      {loading && customers.length === 0 ? (
+        <div className="text-center py-10">Loading customers...</div>
+      ) : (
         <>
           <CustomerList
             customers={filteredCustomers}
@@ -405,13 +488,24 @@ const CustomerSection = ({ userId, user }) => {
                 <span className="font-medium">Filters applied • </span>
               )}
               Showing {filteredCustomers.length} customers
+              {shopContext && (
+                <span className="text-gray-500"> • {shopContext.shopName}</span>
+              )}
             </div>
             <div className="flex items-center gap-4">
-              <button onClick={handlePrevPage} disabled={page <= 1 || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
+              <button 
+                onClick={handlePrevPage} 
+                disabled={page <= 1 || loading} 
+                className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
+              >
                 <ChevronLeft className="w-4 h-4" /> {loading && page > 1 ? 'Loading...' : 'Previous'}
               </button>
               <span className="text-sm text-gray-700 font-medium">Page {page}</span>
-              <button onClick={handleNextPage} disabled={isLastPage || loading} className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50">
+              <button 
+                onClick={handleNextPage} 
+                disabled={isLastPage || loading} 
+                className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
+              >
                 {loading && page === 1 ? 'Loading...' : 'Next'} <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -422,4 +516,4 @@ const CustomerSection = ({ userId, user }) => {
   );
 };
 
-export default CustomerSection;
+export default CustomerSection; 
