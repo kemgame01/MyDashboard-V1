@@ -1,18 +1,14 @@
 // src/features/shops/ShopManagementComponents.jsx
 import React from 'react';
-
-// Import the components from their dedicated files
+import { getUserShops } from '../../utils/shopPermissions';
 import ShopAssignmentModal from './ShopAssignmentModal';
 import UserShopAssignments from './UserShopAssignments';
 
-import { getCurrentShop, getUserShops } from '../../utils/shopPermissions';
-
-// ShopSelector Component (This one was unique to this file, so it stays)
-const ShopSelector = ({ user, onShopChange }) => {
-  const currentShop = getCurrentShop(user);
+const ShopSelector = ({ user, onShopChange, shopContext }) => {
   const userShops = getUserShops(user);
+  const currentShop = shopContext; 
 
-  if (userShops.length <= 1) {
+  if (!userShops || userShops.length <= 1) {
     return (
       <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-lg">
         <span className="text-sm font-medium text-blue-900">🏪</span>
@@ -44,6 +40,4 @@ const ShopSelector = ({ user, onShopChange }) => {
   );
 };
 
-
-// Export all three components for easy access elsewhere in the app.
 export { ShopSelector, ShopAssignmentModal, UserShopAssignments };

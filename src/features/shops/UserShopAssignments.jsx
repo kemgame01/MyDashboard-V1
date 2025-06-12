@@ -1,71 +1,85 @@
 // src/features/shops/UserShopAssignments.jsx
 import React, { useState } from 'react';
-import { Edit, Trash2, Save, X } from 'lucide-react'; // For nice icons
-import { SHOP_PERMISSIONS } from '../../Models/shopModel'; // Assuming this holds your roles
+import { Edit, Trash2, Save, X } from 'lucide-react';
+// --- FIX: Importing from the correct file with all the roles ---
+import { SHOP_PERMISSIONS } from '../../utils/shopPermissions';
 
-const UserShopAssignments = ({ user, onRemoveAssignment, onUpdateRole }) => {
-  const [editingAssignment, setEditingAssignment] = useState(null); // Holds the shop being edited
+const UserShopAssignments = ({ user, onRemoveAssignment, onUpdateRole, currentUser }) => {
+  const [editingAssignment, setEditingAssignment] = useState(null);
+  const [newRole, setNewRole] = useState('');
 
-  if (!user.assignedShops || user.assignedShops.length === 0) {
-    return <div className="text-sm text-gray-500 italic">No shop assignments</div>;
-  }
-
-  const handleUpdate = (newRole) => {
+  const handleOpenEditModal = (assignment) => {
+    setNewRole(assignment.role || 'staff');
+    setEditingAssignment(assignment);
+  };
+  
+  const handleUpdate = () => {
     if (onUpdateRole) {
       onUpdateRole(user.id, editingAssignment.shopId, newRole);
     }
-    setEditingAssignment(null); // Close the modal
+    setEditingAssignment(null);
   };
+
+  const canManageAll = currentUser?.isRootAdmin || currentUser?.role === 'admin';
+
+  if (!user.assignedShops || user.assignedShops.length === 0) {
+    return <div className="text-sm text-gray-500 italic mt-2">No shop assignments</div>;
+  }
 
   return (
     <div className="space-y-2">
-      {user.assignedShops.map((assignment) => (
-        <div key={assignment.shopId} className="flex items-center justify-between bg-gray-50 p-2 rounded-md text-sm">
-          {/* Shop Name and Role */}
-          <div>
-            <span className="font-medium mr-2">{assignment.shopName}</span>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-              assignment.isOwner ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-            }`}>
-              {assignment.isOwner ? 'Owner' : (assignment.role || 'staff')}
-            </span>
-          </div>
+      {user.assignedShops.map((assignment) => {
+        const canEdit = !assignment.isOwner || canManageAll;
+        const canDelete = !assignment.isOwner || canManageAll;
 
-          {/* Edit and Remove Buttons */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setEditingAssignment(assignment)}
-              className="text-blue-600 hover:text-blue-800"
-              title="Edit Role"
-            >
-              <Edit size={16} />
-            </button>
-            {!assignment.isOwner && (
-              <button
-                onClick={() => onRemoveAssignment(user.id, assignment.shopId)}
-                className="text-red-600 hover:text-red-800"
-                title="Remove Assignment"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
+        return (
+          <div key={assignment.shopId} className="flex items-center justify-between bg-gray-50 p-2 rounded-md text-sm">
+            <div>
+              <span className="font-medium mr-2">{assignment.shopName}</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                assignment.isOwner ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {assignment.isOwner ? 'Owner' : (assignment.role || 'staff')}
+              </span>
+            </div>
 
-      {/* --- The Modal for Editing a Role --- */}
+            <div className="flex items-center gap-3">
+              {canEdit && (
+                <button
+                    onClick={() => handleOpenEditModal(assignment)}
+                    className="text-blue-600 hover:text-blue-800"
+                    title="Edit Role"
+                >
+                    <Edit size={16} />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  onClick={() => onRemoveAssignment(user.id, assignment.shopId)}
+                  className="text-red-600 hover:text-red-800"
+                  title="Remove Assignment"
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
       {editingAssignment && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-sm mx-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm mx-auto">
             <h3 className="text-lg font-bold mb-4">Edit Role for {editingAssignment.shopName}</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">New Role</label>
                 <select
-                  defaultValue={editingAssignment.role}
-                  onChange={(e) => (editingAssignment.role = e.target.value)}
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2"
                 >
+                  {/* This will now use the correct, complete list of roles */}
                   {Object.keys(SHOP_PERMISSIONS).map(role => (
                     <option key={role} value={role}>
                       {role.charAt(0).toUpperCase() + role.slice(1)}
@@ -74,18 +88,18 @@ const UserShopAssignments = ({ user, onRemoveAssignment, onUpdateRole }) => {
                 </select>
               </div>
             </div>
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={() => handleUpdate(editingAssignment.role)}
-                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
-              >
-                <Save size={18}/> Save
-              </button>
+            <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setEditingAssignment(null)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 flex items-center justify-center gap-2"
+                className="flex-1 bg-gray-200 text-gray-800 py-2 rounded-lg hover:bg-gray-300 font-semibold"
               >
-                <X size={18}/> Cancel
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdate}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-semibold"
+              >
+                Save
               </button>
             </div>
           </div>

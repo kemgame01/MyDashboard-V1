@@ -1,4 +1,3 @@
-// src/hooks/useShopManager.js
 import { useState, useEffect, useCallback } from "react";
 import { db } from "../firebase";
 import {
@@ -8,6 +7,7 @@ import {
   updateDoc,
   doc,
   deleteDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 
 export function useShopManager() {
@@ -32,20 +32,58 @@ export function useShopManager() {
     fetchShops();
   }, [fetchShops]);
 
-  const addShop = async (shopName) => {
-    if (!shopName.trim()) return;
+  /**
+   * REVISED: Now accepts a full data object to create a new shop.
+   * @param {object} shopData - The form data for the new shop.
+   */
+  const addShop = async (shopData) => {
+    if (!shopData || !shopData.shopName || !shopData.shopName.trim()) {
+        setError("Shop name is required.");
+        return;
+    }
     try {
-      await addDoc(collection(db, "shops"), { shopName: shopName.trim() });
+      const newShopPayload = {
+        shopName: shopData.shopName,
+        shopId: "", // Will be updated after creation
+        address: shopData.address || "",
+        phone: shopData.phone || "",
+        email: shopData.email || "",
+        status: shopData.status || "active",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        settings: {
+            currency: shopData.currency || "THB",
+            timezone: shopData.timezone || "Asia/Bangkok",
+            businessHours: {
+                open: shopData.openTime || "09:00",
+                close: shopData.closeTime || "18:00",
+            },
+        },
+      };
+
+      const docRef = await addDoc(collection(db, "shops"), newShopPayload);
+      // Update the document with its own ID for the shopId field
+      await updateDoc(docRef, { shopId: docRef.id });
+
       await fetchShops(); // Refresh list
     } catch (err) {
       setError("Failed to add shop: " + err.message);
     }
   };
 
-  const updateShop = async (shopId, newName) => {
-    if (!newName.trim()) return;
+  /**
+   * REVISED: Now accepts a full data object to update an existing shop.
+   * @param {string} shopId - The ID of the shop to update.
+   * @param {object} shopData - The form data with the fields to update.
+   */
+  const updateShop = async (shopId, shopData) => {
+    if (!shopId || !shopData) return;
     try {
-      await updateDoc(doc(db, "shops", shopId), { shopName: newName.trim() });
+        const updatePayload = {
+            ...shopData, // Contains fields like shopName, address, status, etc.
+            updatedAt: serverTimestamp()
+        };
+      await updateDoc(doc(db, "shops", shopId), updatePayload);
       await fetchShops(); // Refresh list
     } catch (err) {
       setError("Failed to update shop: " + err.message);

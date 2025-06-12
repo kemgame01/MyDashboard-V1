@@ -1,5 +1,5 @@
 // src/components/EnhancedDashboard.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { updateDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -9,13 +9,12 @@ import CustomerSection from '../features/customers/CustomerSection';
 import RoleManagementSection from '../features/users/RoleManagementSection';
 import TaskManagementSection from './TaskManagementSection';
 import CategoryBrandManager from './CategoryBrandManager';
-import ShopManager from './ShopManager'; // 1. Import the new component
+import ShopManager from './ShopManager';
 import InventoryDashboard from '../features/inventory/InventoryDashboard';
 import UserProfile from '../features/userprofile/UserProfile';
 import SalesDashboard from '../features/sales/SalesDashboard';
 import Spinner from './Spinner';
 import { ShopSelector } from '../features/shops/ShopManagementComponents';
-
 import { 
   getCurrentShop, 
   canManageShopStaff,
@@ -30,19 +29,8 @@ const EnhancedDashboard = () => {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const user = useMergedUser();
 
-  // Initialize dashboard when user loads
-  useEffect(() => {
-    if (user === null) {
-      navigate('/login', { replace: true });
-      return;
-    }
-
-    if (user && user !== undefined) {
-      initializeDashboard();
-    }
-  }, [user, navigate]);
-
-  const initializeDashboard = async () => {
+  const initializeDashboard = useCallback(() => {
+    if (!user) return;
     try {
       setDashboardLoading(true);
       
@@ -57,13 +45,22 @@ const EnhancedDashboard = () => {
       if (!user.isRootAdmin && (!user.assignedShops || user.assignedShops.length === 0)) {
         setActiveSection('setup');
       }
-
     } catch (error) {
       console.error('Dashboard initialization error:', error);
     } finally {
       setDashboardLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user === null) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (user) {
+      initializeDashboard();
+    }
+  }, [user, navigate, initializeDashboard]);
 
   const handleLogout = async () => {
     try {
@@ -83,11 +80,9 @@ const EnhancedDashboard = () => {
       await updateDoc(doc(db, 'users', user.uid), {
         currentShop: newShopId
       });
-      
+      // Instead of reloading, just update the context for a smoother experience
       const newShop = user.assignedShops.find(shop => shop.shopId === newShopId);
       setShopContext(newShop);
-      
-      window.location.reload();
     } catch (error) {
       console.error('Shop change error:', error);
     }
@@ -102,9 +97,47 @@ const EnhancedDashboard = () => {
   }
 
   const isRootAdmin = user.isRootAdmin === true;
-  const canManageInventory = canManageShopInventory(user);
-  const canManageStaff = canManageShopStaff(user);
-  const canViewSales = canViewShopSales(user);
+
+  const hasAccessToSection = (section) => {
+    if (isRootAdmin) return true;
+    
+    // Non-admins with no shops can only see their profile or setup screen
+    if (!shopContext && section !== 'userProfile' && section !== 'setup') {
+      return false;
+    }
+    
+    switch (section) {
+      case 'customers':
+      case 'userProfile':
+        return true;
+      case 'roleManagement':
+        return canManageShopStaff(user);
+      case 'inventory':
+      case 'taskManagement':
+        return canManageShopInventory(user);
+      case 'sales':
+        return canViewShopSales(user);
+      case 'brandCategory':
+      case 'shopManagement':
+        return isRootAdmin;
+      default:
+        return false;
+    }
+  };
+
+  const getSectionTitle = (section) => {
+    const titles = {
+      customers: 'Customer Management',
+      roleManagement: 'Role Management',
+      taskManagement: 'Task Management',
+      inventory: 'Inventory Management',
+      sales: 'Sales Dashboard',
+      brandCategory: 'Brand & Category Management',
+      shopManagement: 'Shop Management',
+      userProfile: 'User Profile'
+    };
+    return titles[section] || 'Dashboard';
+  };
 
   if (!isRootAdmin && (!user.assignedShops || user.assignedShops.length === 0)) {
     return (
@@ -139,9 +172,8 @@ const EnhancedDashboard = () => {
       activeSection={activeSection}
       handleLogout={handleLogout}
       showSection={showSection}
-      shopContext={shopContext}
     >
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
             {getSectionTitle(activeSection)}
@@ -152,102 +184,39 @@ const EnhancedDashboard = () => {
             </p>
           )}
         </div>
-        {user.assignedShops && user.assignedShops.length > 1 && (
-          <ShopSelector 
-            user={user} 
-            onShopChange={handleShopChange}
-          />
+        {user.assignedShops && user.assignedShops.length > 0 && (
+            // This is the corrected part. The shopContext is now passed down.
+            <ShopSelector 
+              user={user} 
+              onShopChange={handleShopChange}
+              shopContext={shopContext}
+            />
         )}
       </div>
 
       {/* Section Content */}
-      {activeSection === 'customers' && (
-        <CustomerSection userId={user.uid} user={user} shopContext={shopContext} />
-      )}
-      
-      {activeSection === 'roleManagement' && canManageStaff && (
-        <RoleManagementSection currentUser={user} />
-      )}
-      
-      {activeSection === 'taskManagement' && canManageInventory && (
-        <TaskManagementSection userId={user.uid} isRootAdmin={isRootAdmin} />
-      )}
-      
-      {activeSection === 'inventory' && canManageInventory && (
-        <InventoryDashboard user={user} shopContext={shopContext} />
-      )}
-      
-      {activeSection === 'sales' && canViewSales && (
-        <SalesDashboard user={user} shopContext={shopContext} />
-      )}
-      
-      {activeSection === 'brandCategory' && isRootAdmin && (
-        <CategoryBrandManager user={user} />
-      )}
-
-      {/* 2. Add render logic for the new section */}
-      {activeSection === 'shopManagement' && isRootAdmin && (
-        <ShopManager />
-      )}
-      
-      {activeSection === 'userProfile' && (
-        <UserProfile targetUserId={user.uid} />
-      )}
-
-      {/* Access Denied Message */}
-      {!hasAccessToSection(activeSection, user) && (
+      {hasAccessToSection(activeSection) ? (
+        <>
+            {activeSection === 'customers' && <CustomerSection user={user} shopContext={shopContext} />}
+            {activeSection === 'roleManagement' && <RoleManagementSection currentUser={user} />}
+            {activeSection === 'taskManagement' && <TaskManagementSection userId={user.uid} isRootAdmin={isRootAdmin} />}
+            {activeSection === 'inventory' && <InventoryDashboard user={user} />}
+            {activeSection === 'sales' && <SalesDashboard user={user} shopContext={shopContext} />}
+            {activeSection === 'brandCategory' && isRootAdmin && <CategoryBrandManager />}
+            {activeSection === 'shopManagement' && isRootAdmin && <ShopManager />}
+            {activeSection === 'userProfile' && <UserProfile targetUserId={user.uid} />}
+        </>
+      ) : (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-          <div className="text-yellow-600 mb-2">🔒</div>
+          <div className="text-yellow-600 mb-2 text-2xl">🔒</div>
           <h3 className="text-lg font-semibold text-yellow-800 mb-2">Access Denied</h3>
           <p className="text-yellow-700">
-            You don't have permission to access this section in your current shop role.
+            You don't have permission to access this section with your current role in this shop.
           </p>
         </div>
       )}
     </Layout>
   );
 };
-
-// 3. Update Helper functions
-function getSectionTitle(section) {
-  const titles = {
-    customers: 'Customer Management',
-    roleManagement: 'Role Management',
-    taskManagement: 'Task Management',
-    inventory: 'Inventory Management',
-    sales: 'Sales Dashboard',
-    brandCategory: 'Brand & Category Management',
-    shopManagement: 'Shop Management', // <-- Added
-    userProfile: 'User Profile'
-  };
-  return titles[section] || 'Dashboard';
-}
-
-function hasAccessToSection(section, user) {
-  const isRootAdmin = user.isRootAdmin === true;
-  
-  if (isRootAdmin) return true;
-  
-  switch (section) {
-    case 'customers':
-      return true;
-    case 'roleManagement':
-      return canManageShopStaff(user);
-    case 'inventory':
-      return canManageShopInventory(user);
-    case 'sales':
-      return canViewShopSales(user);
-    case 'taskManagement':
-      return canManageShopInventory(user);
-    case 'brandCategory':
-      return isRootAdmin;
-    case 'shopManagement': // <-- Added
-      return isRootAdmin;
-    case 'userProfile':
-      return true;
-    default:
-      return false;
-  }
-}
 
 export default EnhancedDashboard;
