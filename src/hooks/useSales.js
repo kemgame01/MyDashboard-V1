@@ -3,6 +3,8 @@ import { db } from '../firebase';
 import {
   collection,
   addDoc,
+  updateDoc,
+  doc,
   query,
   where,
   serverTimestamp,
@@ -34,10 +36,14 @@ export default function useSales(user) {
     if (!user?.uid) return;
 
     setLoading(true);
+    
+    // Use root level sales collection
     const salesRef = collection(db, 'sales');
+    
+    // Query based on user role
     const q = isAdmin
-      ? query(salesRef, orderBy('createdAt', 'desc'))
-      : query(salesRef, where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+      ? query(salesRef, orderBy('createdAt', 'desc')) // Admin sees all sales
+      : query(salesRef, where('userId', '==', user.uid), orderBy('createdAt', 'desc')); // User sees only their sales
 
     const unsubscribe = onSnapshot(
       q,
@@ -55,10 +61,9 @@ export default function useSales(user) {
       }
     );
     return unsubscribe;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, isAdmin]);
 
-  // --- Add sale: now supports multi-product array ---
+  // --- Add sale to root-level collection ---
   const addSale = useCallback(
     async (saleData) => {
       if (!user?.uid) return false;
@@ -67,6 +72,15 @@ export default function useSales(user) {
           userId: user.uid,
           ...saleData,
         };
+
+        // Add shop information if available
+        if (user.currentShop && user.assignedShops) {
+          const currentShopInfo = user.assignedShops.find(shop => shop.shopId === user.currentShop);
+          if (currentShopInfo) {
+            payload.shopId = currentShopInfo.shopId;
+            payload.shopName = currentShopInfo.shopName;
+          }
+        }
 
         // Sync createdAt and date
         if (saleData.date || saleData.datetime) {
@@ -83,10 +97,13 @@ export default function useSales(user) {
             theDate = serverTimestamp();
           }
           payload.date = theDate;
+          payload.datetime = theDate;
           payload.createdAt = theDate;
         } else {
-          payload.date = serverTimestamp();
-          payload.createdAt = serverTimestamp();
+          const now = serverTimestamp();
+          payload.date = now;
+          payload.datetime = now;
+          payload.createdAt = now;
         }
 
         // Ensure products[] and totalAmount are stored (multi-product safe)
@@ -113,6 +130,7 @@ export default function useSales(user) {
           payload.totalAmount = Number(payload.amount);
         }
 
+        // Add to root-level sales collection
         await addDoc(collection(db, 'sales'), payload);
 
         return true;
@@ -121,7 +139,55 @@ export default function useSales(user) {
         return false;
       }
     },
-    [user?.uid]
+    [user]
+  );
+
+  // --- Update sale in root-level collection ---
+  const updateSale = useCallback(
+    async (saleId, saleData) => {
+      if (!saleId) return false;
+      try {
+        let payload = {
+          ...saleData,
+          updatedAt: serverTimestamp(),
+        };
+
+        // Sync date fields if provided
+        if (saleData.date || saleData.datetime) {
+          let theDate = saleData.date || saleData.datetime;
+          if (theDate instanceof Timestamp) {
+            // do nothing
+          } else if (theDate instanceof Date) {
+            theDate = Timestamp.fromDate(theDate);
+          } else if (typeof theDate === 'string') {
+            theDate = Timestamp.fromDate(new Date(theDate));
+          }
+          payload.date = theDate;
+          payload.datetime = theDate;
+        }
+
+        // Ensure products[] and totalAmount are stored
+        if (Array.isArray(saleData.products)) {
+          payload.products = saleData.products.map(p => ({
+            productId: p.product?.id || p.productId,
+            productName: p.product?.name || p.productName,
+            price: Number(p.price || 0),
+            quantity: Number(p.quantity || 1),
+            subtotal: Number(p.subtotal || (p.price * p.quantity) || 0),
+          }));
+          payload.totalAmount = payload.products.reduce((sum, p) => sum + Number(p.subtotal), 0);
+        }
+
+        // Update in root-level sales collection
+        await updateDoc(doc(db, 'sales', saleId), payload);
+
+        return true;
+      } catch (err) {
+        console.error('[useSales] updateSale error:', err);
+        return false;
+      }
+    },
+    []
   );
 
   // --- Totals (sum all product subtotals, robust for multi-product) ---
@@ -177,6 +243,7 @@ export default function useSales(user) {
     sales,
     loading,
     addSale,
+    updateSale,
     totals,
     monthlyLog,
   };

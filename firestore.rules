@@ -1,86 +1,112 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
     // --- HELPER FUNCTIONS ---
-    function getRole(uid) {
-      return exists(/databases/$(database)/documents/users/$(uid))
-        ? get(/databases/$(database)/documents/users/$(uid)).data.role
+    function isRootAdmin() {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isRootAdmin == true;
+    }
+    
+    function getUserRole() {
+      return request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
         : '';
     }
-
-    function isRole(role) {
-      return request.auth != null && getRole(request.auth.uid) == role;
+    function hasRole(role) {
+      return getUserRole() == role;
     }
     
-    function isRootAdmin() {
-      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isRootAdmin == true;
+    function canManageSales() {
+      let role = getUserRole();
+      return isRootAdmin() || 
+             role == 'admin' || 
+             role == 'manager' || 
+             role == 'sales';
+    }
+    function canManageInventory() {
+      let role = getUserRole();
+      return isRootAdmin() || 
+             role == 'admin' || 
+             role == 'manager';
     }
     
-    // --- RULES FOR COLLECTIONS ---
-
-    // USERS: Users can read/update their own data. Admins can view/update other user profiles.
+    // --- COLLECTION RULES ---
     match /users/{userId} {
-      allow read, update: if request.auth.uid == userId || isRole('admin') || isRootAdmin();
+      allow read, update: if request.auth.uid == userId || hasRole('admin') || isRootAdmin();
+      allow create: if isRootAdmin() || hasRole('admin');
+      
+      // INVENTORY & TASKS (Subcollections of Users)
+      match /inventory/{itemId} {
+        allow read, write: if request.auth.uid == userId || canManageInventory();
+      }
+      match /inventoryHistory/{logId} {
+        allow read, create: if request.auth.uid == userId || canManageInventory();
+      }
+      // Remove old sales rule as sales are now at root level
+      match /tasks/{taskId} {
+        allow read, write: if request.auth.uid == userId || isRootAdmin();
+      }
     }
     
-    // --- NEW RULE FOR ADMINS TO QUERY ALL CUSTOMERS ---
-    // This is the required rule for the admin dashboard feature to work.
-    // It allows admins to perform the `collectionGroup` query.
-    match /{path=**}/customers/{customerId} {
-      allow list: if isRole('admin') || isRootAdmin();
+    // --- ROOT LEVEL SALES COLLECTION ---
+    match /sales/{saleId} {
+      // Allow read if:
+      // 1. User is admin/root admin (can see all sales)
+      // 2. User has sales/manager role
+      // 3. User is the owner of the sale (userId field matches)
+      allow read: if canManageSales() || 
+                     (request.auth != null && resource.data.userId == request.auth.uid);
+      
+      // Allow create if authenticated and has permission to manage sales
+      allow create: if request.auth != null && 
+                       (canManageSales() || hasRole('staff'));
+      
+      // Allow update/delete if:
+      // 1. User is admin/root admin
+      // 2. User has manager role
+      // 3. User owns the sale
+      allow update, delete: if isRootAdmin() || 
+                              hasRole('admin') || 
+                              hasRole('manager') ||
+                              (request.auth != null && resource.data.userId == request.auth.uid);
     }
-
-    // CUSTOMERS: Regular users can manage their own customers. Admins have full access.
+    
+    // --- CUSTOMERS: THIS IS THE FIX ---
+    // This simplified rule securely covers all cases for reading, writing, and listing.
     match /users/{userId}/customers/{customerId} {
-      // A regular user can get/write THEIR OWN customers and must limit list queries.
-      allow get, write: if request.auth.uid == userId;
-      allow list: if request.auth.uid == userId && request.query.limit <= 100;
-
-      // An admin can get, list, or write to ANY customer document.
-      allow get, list, write: if isRole('admin') || isRootAdmin();
-    }
-
-    // INVENTORY: Owner and specific roles can read. Only Admin/Manager can write.
-    match /users/{userId}/inventory/{itemId} {
-      allow read: if request.auth.uid == userId || isRole('admin') || isRole('manager');
-      allow write: if request.auth.uid == userId && (isRole('admin') || isRole('manager'));
+      allow read, write, list: if request.auth.uid == userId || hasRole('admin') || isRootAdmin();
     }
     
-    // INVENTORY HISTORY: Owner and specific roles can access.
-    match /users/{userId}/inventoryHistory/{logId} {
-       allow read, create: if request.auth.uid == userId || isRole('admin') || isRole('manager');
+    // Collection group query for customers (admin dashboard)
+    match /{path=**}/customers/{customerId} {
+      allow read: if hasRole('admin') || isRootAdmin();
     }
-
-    // TASKS: Private to the owner.
-    match /users/{userId}/tasks/{taskId} {
-      allow read, write: if request.auth.uid == userId;
+    
+    // GLOBAL COLLECTIONS
+    match /shops/{shopId} {
+      allow read: if request.auth != null;
+      allow write: if isRootAdmin() || hasRole('admin');
     }
-
-    // BRANDS, CATEGORIES, TRACKING COMPANIES: Authenticated users can read.
     match /brands/{brandId} {
       allow read: if request.auth != null;
-      allow write: if isRootAdmin();
+      allow write: if isRootAdmin() || hasRole('admin');
     }
     match /categories/{categoryId} {
       allow read: if request.auth != null;
-      allow write: if isRootAdmin();
+      allow write: if isRootAdmin() || hasRole('admin');
     }
     match /trackingCompanies/{companyId} {
       allow read: if request.auth != null;
+      allow write: if isRootAdmin() || hasRole('admin');
     }
     
-    // SALES: Users create their own. Specific roles can read all sales.
-    match /sales/{saleId} {
-      allow read: if request.auth.uid == resource.data.userId;
-      allow list, get: if isRole('admin') || isRole('manager') || isRole('sales');
-      allow create: if request.auth.uid == request.resource.data.userId;
-    }
-
-    // AUDIT LOGS: Only Admins/Root can access.
+    // AUDIT LOGS & INVITES
     match /auditLogs/{logId} {
-        allow read, create: if isRole('admin') || isRootAdmin();
+      allow read, write: if hasRole('admin') || isRootAdmin();
+    }
+    match /invites/{inviteId} {
+      allow read, write: if hasRole('admin') || isRootAdmin();
     }
   }
 }

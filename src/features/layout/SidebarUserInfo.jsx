@@ -1,6 +1,22 @@
 import React from "react";
 
-export default function SidebarUserInfo({ user, getMaskedId, getInitials }) {
+// --- Helper Functions ---
+// Moved here from Sidebar.jsx for better encapsulation.
+const getMaskedId = (uid) => (!uid ? "-" : uid.slice(0, 10) + "-XXXXXXX");
+
+const getInitials = (nameOrEmail) =>
+  !nameOrEmail
+    ? "?"
+    : nameOrEmail
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+
+// --- Component ---
+// Now it only needs the 'user' prop.
+export default function SidebarUserInfo({ user }) {
   const userName = user.name || user.displayName || (user.email ? user.email.split('@')[0] : "Unknown");
   const userEmail = user.email || "-";
   const userRole = (user.role || "").toLowerCase();

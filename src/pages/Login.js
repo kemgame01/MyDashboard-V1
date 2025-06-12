@@ -4,6 +4,7 @@ import InputField from '../components/InputField';
 import { loginUser } from '../services/authService';
 import { auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import '../styles/Login.css'; // Your animated background styles
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -14,12 +15,11 @@ const Login = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Redirect to dashboard if already logged in
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         navigate('/dashboard', { replace: true });
       } else {
-        setCheckingAuth(false); // Not logged in, show form
+        setCheckingAuth(false);
       }
     });
     return () => unsubscribe();
@@ -33,7 +33,6 @@ const Login = () => {
     const result = await loginUser(email, password);
 
     if (result.success) {
-      // lastLogin is set in Firestore in loginUser
       navigate('/dashboard', { replace: true });
     } else {
       setError('Failed to login. Please check your credentials.');
@@ -42,17 +41,19 @@ const Login = () => {
   };
 
   if (checkingAuth) {
-    // Show a modern spinner while checking auth state
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500"></div>
+      <div className="login-body">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white"></div>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-100 flex items-center justify-center min-h-screen">
-      <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-sm">
+    // This outer div still uses your animated background
+    <div className="login-body">
+      {/* --- MODIFIED: Changed to a solid white card with a stronger shadow --- */}
+      <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm">
+        {/* --- MODIFIED: Text color changed to dark gray --- */}
         <h2 className="text-2xl font-bold mb-6 text-gray-800 text-center">Login to Dashboard</h2>
 
         {error && <p className="text-red-500 text-center mb-4">{error}</p>}
@@ -81,12 +82,14 @@ const Login = () => {
           <button
             type="submit"
             disabled={loading}
+            // --- MODIFIED: Adjusted button style for better contrast on white ---
             className={`w-full bg-blue-600 text-white py-2 rounded-lg mt-4 transition font-semibold ${loading ? "opacity-60 cursor-not-allowed" : "hover:bg-blue-700"}`}
           >
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
 
+        {/* --- MODIFIED: Text color changed for readability --- */}
         <p className="text-gray-600 text-center mt-4">
           Don't have an account?{' '}
           <Link to="/signup" className="text-blue-500 hover:underline">Sign up</Link>

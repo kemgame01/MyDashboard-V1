@@ -11,12 +11,13 @@ const normalize = str =>
     .normalize("NFC")
     .toLowerCase();
 
-export default function RecentSalesSection({ user, sales }) {
+export default function RecentSalesSection({ user, sales, shopContext, onEditSale }) {
   const [dateStart, setDateStart] = useState(new Date());
   const [dateEnd, setDateEnd] = useState(null);
   const [channelFilter, setChannelFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
+  const [shopFilter, setShopFilter] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const rowsPerPage = 20;
@@ -25,7 +26,7 @@ export default function RecentSalesSection({ user, sales }) {
   const customers = useCustomers(user?.uid, "");
 
   useEffect(() => { setPage(1); }, [
-    dateStart, dateEnd, channelFilter, productFilter, customerFilter, search
+    dateStart, dateEnd, channelFilter, productFilter, customerFilter, shopFilter, search
   ]);
 
   const productOptions = useMemo(() => {
@@ -40,6 +41,15 @@ export default function RecentSalesSection({ user, sales }) {
     return Array.from(new Set(all));
   }, [customers]);
 
+  const shopOptions = useMemo(() => {
+    // Get unique shop names from sales
+    const shops = new Set();
+    sales.forEach(sale => {
+      if (sale.shopName) shops.add(sale.shopName);
+    });
+    return Array.from(shops);
+  }, [sales]);
+
   const channelOptions = ["", "Facebook", "LINE", "Shopee", "Lazada", "Other"];
 
   // --- Filtering logic for MULTI-PRODUCT SALES ---
@@ -53,6 +63,9 @@ export default function RecentSalesSection({ user, sales }) {
 
       // Channel
       if (channelFilter && sale.channel !== channelFilter) return false;
+
+      // Shop filter (for admins to filter by shop)
+      if (shopFilter && sale.shopName !== shopFilter) return false;
 
       // Multi-product: match if any product in sale matches the filter
       let productNames = [];
@@ -72,6 +85,7 @@ export default function RecentSalesSection({ user, sales }) {
         const fields = [
           sale.customerName,
           sale.channel,
+          sale.shopName,
           ...productNames,
           String(sale.totalAmount || sale.amount || 0),
           date.toLocaleDateString("en-GB")
@@ -80,7 +94,7 @@ export default function RecentSalesSection({ user, sales }) {
       }
       return true;
     });
-  }, [sales, dateStart, dateEnd, channelFilter, productFilter, customerFilter, search]);
+  }, [sales, dateStart, dateEnd, channelFilter, productFilter, customerFilter, shopFilter, search]);
 
   // --- Pagination ---
   const pagedSales = useMemo(() => {
@@ -119,6 +133,8 @@ export default function RecentSalesSection({ user, sales }) {
             Price: prod.price,
             Subtotal: prod.subtotal,
             Channel: sale.channel,
+            Shop: sale.shopName || '',
+            User: sale.userId
           });
         });
       } else {
@@ -131,6 +147,8 @@ export default function RecentSalesSection({ user, sales }) {
           Price: sale.amount,
           Subtotal: sale.amount,
           Channel: sale.channel,
+          Shop: sale.shopName || '',
+          User: sale.userId
         });
       }
     });
@@ -153,8 +171,12 @@ export default function RecentSalesSection({ user, sales }) {
     }
   };
 
+  const isAdmin = user?.role === 'admin' || user?.isRootAdmin === true;
+
   return (
     <div className="bg-white rounded-2xl shadow mb-8 p-4 sm:p-8 w-full">
+      <h3 className="text-xl font-bold text-[#223163] mb-4">Recent Sales</h3>
+      
       {/* --- Filters --- */}
       <div className="flex flex-wrap gap-2 items-center mb-4">
         <span className="font-medium text-[#223163]">Date:</span>
@@ -199,6 +221,21 @@ export default function RecentSalesSection({ user, sales }) {
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
+        
+        {/* Shop filter - only show for admins */}
+        {isAdmin && shopOptions.length > 0 && (
+          <select
+            value={shopFilter}
+            onChange={e => setShopFilter(e.target.value)}
+            className="border border-gray-300 p-2 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          >
+            <option value="">All Shops</option>
+            {shopOptions.map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        )}
+        
         {/* Styled search box */}
         <input
           className="px-4 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] w-[180px]"
@@ -214,6 +251,14 @@ export default function RecentSalesSection({ user, sales }) {
           Export
         </button>
       </div>
+      
+      {/* Current shop context display */}
+      {shopContext && !isAdmin && (
+        <div className="mb-2 text-sm text-gray-600">
+          Showing sales for: <span className="font-semibold">{shopContext.shopName}</span>
+        </div>
+      )}
+      
       {/* --- Total Sales --- */}
       <div className="mb-2 font-bold text-right">
         Total Sales:{" "}
@@ -221,6 +266,7 @@ export default function RecentSalesSection({ user, sales }) {
           {totalAmount.toLocaleString()} ฿
         </span>
       </div>
+      
       {/* --- Table --- */}
       <table className="min-w-full text-xs sm:text-sm">
         <thead>
@@ -229,43 +275,68 @@ export default function RecentSalesSection({ user, sales }) {
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Customer</th>
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Product</th>
             <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Qty</th>
-            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Price</th>
+            <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Price (฿)</th>
             <th className="p-2 sm:p-3 text-right font-semibold text-[#223163]">Subtotal</th>
             <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Channel</th>
+            {isAdmin && <th className="p-2 sm:p-3 text-left font-semibold text-[#223163]">Shop</th>}
+            <th className="p-2 sm:p-3 text-center font-semibold text-[#223163]">Actions</th>
           </tr>
         </thead>
         <tbody>
           {pagedSales.length === 0 ? (
             <tr>
-              <td colSpan={7} className="p-4 text-center text-gray-400">No sales found.</td>
+              <td colSpan={isAdmin ? 9 : 8} className="p-4 text-center text-gray-400">No sales found.</td>
             </tr>
           ) : pagedSales.map(sale => (
             Array.isArray(sale.products) && sale.products.length > 0 ? (
               sale.products.map((prod, idx) => (
                 <tr key={sale.id + "-" + idx} className="border-b hover:bg-[#F5F7FB] transition">
-                  <td className="p-2 sm:p-3">{formatTime(sale.date)}</td>
+                  <td className="p-2 sm:p-3">{formatTime(sale.date || sale.datetime)}</td>
                   <td className="p-2 sm:p-3">{sale.customerName || "-"}</td>
                   <td className="p-2 sm:p-3">{prod.productName || "-"}</td>
                   <td className="p-2 sm:p-3 text-right">{prod.quantity || 1}</td>
                   <td className="p-2 sm:p-3 text-right">{Number(prod.price || 0).toLocaleString()}</td>
                   <td className="p-2 sm:p-3 text-right font-bold">{Number(prod.subtotal || 0).toLocaleString()}</td>
                   <td className="p-2 sm:p-3">{sale.channel}</td>
+                  {isAdmin && <td className="p-2 sm:p-3">{sale.shopName || "-"}</td>}
+                  <td className="p-2 sm:p-3 text-center">
+                    {idx === 0 && onEditSale && (
+                      <button
+                        onClick={() => onEditSale(sale)}
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr key={sale.id} className="border-b hover:bg-[#F5F7FB] transition">
-                <td className="p-2 sm:p-3">{formatTime(sale.date)}</td>
+                <td className="p-2 sm:p-3">{formatTime(sale.date || sale.datetime)}</td>
                 <td className="p-2 sm:p-3">{sale.customerName || "-"}</td>
                 <td className="p-2 sm:p-3">{sale.productName || "-"}</td>
                 <td className="p-2 sm:p-3 text-right">1</td>
                 <td className="p-2 sm:p-3 text-right">{Number(sale.amount || 0).toLocaleString()}</td>
                 <td className="p-2 sm:p-3 text-right font-bold">{Number(sale.amount || 0).toLocaleString()}</td>
                 <td className="p-2 sm:p-3">{sale.channel}</td>
+                {isAdmin && <td className="p-2 sm:p-3">{sale.shopName || "-"}</td>}
+                <td className="p-2 sm:p-3 text-center">
+                  {onEditSale && (
+                    <button
+                      onClick={() => onEditSale(sale)}
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </td>
               </tr>
             )
           ))}
         </tbody>
       </table>
+      
       {/* Pagination */}
       {filteredSales.length > rowsPerPage && (
         <div className="flex justify-end mt-2 gap-2">

@@ -9,6 +9,7 @@ import CustomerSection from '../features/customers/CustomerSection';
 import RoleManagementSection from '../features/users/RoleManagementSection';
 import TaskManagementSection from './TaskManagementSection';
 import CategoryBrandManager from './CategoryBrandManager';
+import ShopManager from './ShopManager'; // 1. Import the new component
 import InventoryDashboard from '../features/inventory/InventoryDashboard';
 import UserProfile from '../features/userprofile/UserProfile';
 import SalesDashboard from '../features/sales/SalesDashboard';
@@ -17,7 +18,6 @@ import { ShopSelector } from '../features/shops/ShopManagementComponents';
 
 import { 
   getCurrentShop, 
-  hasShopPermission, 
   canManageShopStaff,
   canManageShopInventory,
   canViewShopSales 
@@ -46,17 +46,14 @@ const EnhancedDashboard = () => {
     try {
       setDashboardLoading(true);
       
-      // Get user's current shop context
       const currentShop = getCurrentShop(user);
       setShopContext(currentShop);
 
-      // Load saved section or default
       const savedSection = localStorage.getItem('activeSection');
       if (savedSection) {
         setActiveSection(savedSection);
       }
 
-      // If user has no shop assignments and is not root admin, show setup
       if (!user.isRootAdmin && (!user.assignedShops || user.assignedShops.length === 0)) {
         setActiveSection('setup');
       }
@@ -83,39 +80,32 @@ const EnhancedDashboard = () => {
 
   const handleShopChange = async (newShopId) => {
     try {
-      // Update user's current shop in database
       await updateDoc(doc(db, 'users', user.uid), {
         currentShop: newShopId
       });
       
-      // Refresh shop context
       const newShop = user.assignedShops.find(shop => shop.shopId === newShopId);
       setShopContext(newShop);
       
-      // Optionally reload current section with new shop context
       window.location.reload();
     } catch (error) {
       console.error('Shop change error:', error);
     }
   };
 
-  // Show loading spinner while user or dashboard initializes
   if (user === undefined || dashboardLoading) {
     return <Spinner text="Loading Dashboard..." />;
   }
 
-  // Redirect if no user
   if (!user) {
     return null; 
   }
 
-  // Check permissions based on current shop
   const isRootAdmin = user.isRootAdmin === true;
   const canManageInventory = canManageShopInventory(user);
   const canManageStaff = canManageShopStaff(user);
   const canViewSales = canViewShopSales(user);
 
-  // Show setup screen if user has no shop access
   if (!isRootAdmin && (!user.assignedShops || user.assignedShops.length === 0)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -151,7 +141,6 @@ const EnhancedDashboard = () => {
       showSection={showSection}
       shopContext={shopContext}
     >
-      {/* Shop Selector in Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
@@ -195,6 +184,11 @@ const EnhancedDashboard = () => {
       {activeSection === 'brandCategory' && isRootAdmin && (
         <CategoryBrandManager user={user} />
       )}
+
+      {/* 2. Add render logic for the new section */}
+      {activeSection === 'shopManagement' && isRootAdmin && (
+        <ShopManager />
+      )}
       
       {activeSection === 'userProfile' && (
         <UserProfile targetUserId={user.uid} />
@@ -214,7 +208,7 @@ const EnhancedDashboard = () => {
   );
 };
 
-// Helper functions
+// 3. Update Helper functions
 function getSectionTitle(section) {
   const titles = {
     customers: 'Customer Management',
@@ -223,6 +217,7 @@ function getSectionTitle(section) {
     inventory: 'Inventory Management',
     sales: 'Sales Dashboard',
     brandCategory: 'Brand & Category Management',
+    shopManagement: 'Shop Management', // <-- Added
     userProfile: 'User Profile'
   };
   return titles[section] || 'Dashboard';
@@ -235,7 +230,7 @@ function hasAccessToSection(section, user) {
   
   switch (section) {
     case 'customers':
-      return true; // Everyone can access customers
+      return true;
     case 'roleManagement':
       return canManageShopStaff(user);
     case 'inventory':
@@ -245,6 +240,8 @@ function hasAccessToSection(section, user) {
     case 'taskManagement':
       return canManageShopInventory(user);
     case 'brandCategory':
+      return isRootAdmin;
+    case 'shopManagement': // <-- Added
       return isRootAdmin;
     case 'userProfile':
       return true;

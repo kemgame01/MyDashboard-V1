@@ -18,6 +18,7 @@ const PAGE_SIZE = 15;
 
 const CustomerSection = ({ userId, user, shopContext }) => { 
   const [customers, setCustomers] = useState([]);
+  const [allCustomers, setAllCustomers] = useState([]); // Store all customers for filtering
   const [trackingCompanies, setTrackingCompanies] = useState([]);
   const [newCustomer, setNewCustomer] = useState({});
   const [isAdding, setIsAdding] = useState(false);
@@ -27,9 +28,6 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [tagChangeInfo, setTagChangeInfo] = useState(null);
   const [page, setPage] = useState(1);
-  const [firstVisible, setFirstVisible] = useState(null);
-  const [lastVisible, setLastVisible] = useState(null);
-  const [isLastPage, setIsLastPage] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   
   // Advanced filters state
@@ -48,61 +46,14 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   
   // Get unique tags from customers
   const availableTags = useMemo(() => {
-    const tags = new Set(['New', 'Active', 'Inactive', 'VIP']); // Default tags
-    customers.forEach(customer => {
+    const tags = new Set(['New', 'Active', 'Inactive', 'VIP']);
+    allCustomers.forEach(customer => {
       if (customer.tags && customer.tags.length > 0) {
         customer.tags.forEach(tag => tags.add(tag));
       }
     });
     return Array.from(tags);
-  }, [customers]);
-
-  // Build query with filters
-  const buildQueryWithFilters = useCallback((baseQuery) => {
-    let conditions = [];
-    
-    // Tag filter
-    if (activeFilters.tag && activeFilters.tag !== 'all') {
-      conditions.push(where('tags', 'array-contains', activeFilters.tag));
-    }
-    
-    // Date range filters
-    if (activeFilters.dateFrom) {
-      conditions.push(where('createdAt', '>=', new Date(activeFilters.dateFrom)));
-    }
-    if (activeFilters.dateTo) {
-      const endDate = new Date(activeFilters.dateTo);
-      endDate.setHours(23, 59, 59, 999);
-      conditions.push(where('createdAt', '<=', endDate));
-    }
-    
-    // Shop-specific filter for non-admins
-    if (!isAdmin && shopContext?.shopId) {
-      conditions.push(where('shopId', '==', shopContext.shopId));
-    }
-    
-    // For complex queries with multiple conditions, we need composite indexes
-    // For now, we'll apply filters client-side after fetching
-    return baseQuery;
-  }, [activeFilters, isAdmin, shopContext]);
-
-  const customersQuery = useMemo(() => {
-    let baseQuery;
-    if (isAdmin) {
-      baseQuery = query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'));
-    } else if (userId) {
-      baseQuery = query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'));
-    } else {
-      return null;
-    }
-    
-    // Apply shop filter if needed
-    if (!isAdmin && shopContext?.shopId) {
-      baseQuery = addShopFilter(baseQuery, user, 'shopId') || baseQuery;
-    }
-    
-    return buildQueryWithFilters(baseQuery);
-  }, [userId, isAdmin, buildQueryWithFilters, shopContext, user]);
+  }, [allCustomers]);
 
   const mapCustomerData = (doc) => ({
     id: doc.id,
@@ -162,95 +113,99 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         if (!searchableFields.includes(searchLower)) return false;
       }
       
+      // Quick search
+      if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        const searchableFields = [
+          customer.firstName,
+          customer.lastName,
+          customer.email,
+          customer.phoneNumber,
+          customer.company,
+          customer.address,
+          customer.trackingCode,
+          customer.trackingCompany
+        ].filter(Boolean).join(' ').toLowerCase();
+        
+        if (!searchableFields.includes(searchLower)) return false;
+      }
+      
       return true;
     });
-  }, [activeFilters, isAdmin, user]);
+  }, [activeFilters, isAdmin, user, searchTerm]);
 
-  const loadInitialPage = useCallback(() => {
-    if (!customersQuery) return;
-    setLoading(true);
-    const firstPageQuery = query(customersQuery, limit(PAGE_SIZE));
+  // Load all customers initially
+  const loadAllCustomers = useCallback(async () => {
+    if (!userId && !isAdmin) return;
     
-    getDocs(firstPageQuery).then(snapshot => {
-      if (!snapshot.empty) {
-        const allCustomers = snapshot.docs.map(mapCustomerData);
-        const filteredCustomers = applyClientSideFilters(allCustomers);
-        setCustomers(filteredCustomers);
-        setFirstVisible(snapshot.docs[0]);
-        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
-        setIsLastPage(snapshot.docs.length < PAGE_SIZE);
-        setPage(1);
+    setLoading(true);
+    try {
+      let baseQuery;
+      if (isAdmin) {
+        baseQuery = query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'));
       } else {
-        setCustomers([]);
-        setIsLastPage(true);
+        baseQuery = query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'));
       }
-    }).catch(err => {
-      console.error("Error fetching initial page: ", err);
+      
+      // Apply shop filter if needed
+      if (!isAdmin && shopContext?.shopId) {
+        baseQuery = addShopFilter(baseQuery, user, 'shopId') || baseQuery;
+      }
+      
+      const snapshot = await getDocs(baseQuery);
+      const allData = snapshot.docs.map(mapCustomerData);
+      setAllCustomers(allData);
+      
+      // Apply filters and pagination
+      updateDisplayedCustomers(allData);
+    } catch (err) {
+      console.error("Error fetching customers: ", err);
       setFormError("Failed to load customers.");
-    }).finally(() => setLoading(false));
-  }, [customersQuery, applyClientSideFilters]);
-
-  useEffect(() => {
-    if (customersQuery) {
-        loadInitialPage();
+    } finally {
+      setLoading(false);
     }
+  }, [userId, isAdmin, shopContext, user]);
+
+  // Update displayed customers based on filters and pagination
+  const updateDisplayedCustomers = useCallback((customersData) => {
+    const filtered = applyClientSideFilters(customersData || allCustomers);
+    
+    // Calculate pagination
+    const startIndex = (page - 1) * PAGE_SIZE;
+    const endIndex = startIndex + PAGE_SIZE;
+    const paged = filtered.slice(startIndex, endIndex);
+    
+    setCustomers(paged);
+  }, [allCustomers, applyClientSideFilters, page]);
+
+  // Load initial data
+  useEffect(() => {
+    loadAllCustomers();
+    
     const fetchTrackingCompanies = async () => {
       const companiesSnapshot = await getDocs(collection(db, 'trackingCompanies'));
       setTrackingCompanies(companiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     };
     fetchTrackingCompanies();
-  }, [customersQuery, loadInitialPage]);
+  }, [loadAllCustomers]);
+
+  // Update displayed customers when filters, search, or page changes
+  useEffect(() => {
+    updateDisplayedCustomers();
+  }, [updateDisplayedCustomers, searchTerm, page]);
 
   // Reload when shop context changes
   useEffect(() => {
     if (shopContext) {
-      loadInitialPage();
+      loadAllCustomers();
     }
-  }, [shopContext, loadInitialPage]);
+  }, [shopContext, loadAllCustomers]);
 
-  const handleNextPage = async () => {
-    if (!lastVisible || !customersQuery) return;
-    setLoading(true);
-    const nextPageQuery = query(customersQuery, startAfter(lastVisible), limit(PAGE_SIZE));
-    try {
-        const snapshot = await getDocs(nextPageQuery);
-        if(!snapshot.empty) {
-            const allCustomers = snapshot.docs.map(mapCustomerData);
-            const filteredCustomers = applyClientSideFilters(allCustomers);
-            setCustomers(filteredCustomers);
-            setFirstVisible(snapshot.docs[0]);
-            setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
-            setIsLastPage(snapshot.docs.length < PAGE_SIZE);
-            setPage(p => p + 1);
-        } else { setIsLastPage(true); }
-    } catch (err) { console.error("Error fetching next page: ", err); } 
-    finally { setLoading(false); }
-  };
-
-  const handlePrevPage = async () => {
-    if (!firstVisible || !customersQuery) return;
-    setLoading(true);
-    const prevPageQuery = query(customersQuery, endBefore(firstVisible), limitToLast(PAGE_SIZE));
-    try {
-        const snapshot = await getDocs(prevPageQuery);
-        if(!snapshot.empty) {
-            const allCustomers = snapshot.docs.map(mapCustomerData);
-            const filteredCustomers = applyClientSideFilters(allCustomers);
-            setCustomers(filteredCustomers);
-            setFirstVisible(snapshot.docs[0]);
-            setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
-            setIsLastPage(false);
-            setPage(p => p - 1);
-        }
-    } catch(err) { console.error("Error fetching previous page: ", err); }
-    finally { setLoading(false); }
-  };
-  
-  // Apply filters
+  // Apply filters - ALWAYS reset to page 1
   const handleApplyFilters = () => {
     setActiveFilters({ ...filters });
-    setPage(1);
-    loadInitialPage();
+    setPage(1); // Reset to page 1
+    updateDisplayedCustomers();
   };
   
   // Reset filters
@@ -265,8 +220,31 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     };
     setFilters(resetFilters);
     setActiveFilters({});
-    setPage(1);
-    loadInitialPage();
+    setPage(1); // Reset to page 1
+    updateDisplayedCustomers();
+  };
+
+  // Search handler - reset to page 1
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    setPage(1); // Reset to page 1 when searching
+  };
+
+  // Pagination handlers
+  const totalFilteredCustomers = applyClientSideFilters(allCustomers).length;
+  const totalPages = Math.ceil(totalFilteredCustomers / PAGE_SIZE);
+  const isLastPage = page >= totalPages;
+
+  const handleNextPage = () => {
+    if (!isLastPage) {
+      setPage(p => p + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (page > 1) {
+      setPage(p => p - 1);
+    }
   };
 
   const handleInitiateTagChange = (customerId, newTag, currentTag) => {
@@ -282,6 +260,9 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     try {
       const customerDocRef = doc(db, 'users', owner, 'customers', customerId);
       await updateDoc(customerDocRef, { tags: [newTag] });
+      
+      // Update local state
+      setAllCustomers(prev => prev.map(c => c.id === customerId ? { ...c, tags: [newTag] } : c));
       setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, tags: [newTag] } : c));
     } catch (error) {
       console.error("Error updating tag:", error);
@@ -303,18 +284,17 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     }
     
     try {
-      // Add shop context to new customer if available
       const customerData = { 
         ...newCustomer, 
         createdAt: serverTimestamp(), 
         tags: ['New'],
-        shopId: shopContext?.shopId || null // Associate with current shop
+        shopId: shopContext?.shopId || null
       };
       
       await addDoc(collection(db, 'users', userId, 'customers'), customerData);
       setIsAdding(false); 
       setNewCustomer({}); 
-      loadInitialPage();
+      loadAllCustomers();
     } catch (e) { 
       setFormError('Error adding customer.') 
     }
@@ -322,16 +302,15 @@ const CustomerSection = ({ userId, user, shopContext }) => {
 
   const handleQuickAdd = async (data) => {
     try {
-      // Add shop context to quick add customer if available
       const customerData = { 
         ...data, 
         createdAt: serverTimestamp(), 
         tags: ['New'],
-        shopId: shopContext?.shopId || null // Associate with current shop
+        shopId: shopContext?.shopId || null
       };
       
       await addDoc(collection(db, 'users', userId, 'customers'), customerData);
-      loadInitialPage();
+      loadAllCustomers();
     } catch (e) { 
       setFormError('Error adding customer.') 
     }
@@ -342,13 +321,13 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     if (!window.confirm(`Delete ${idsToDelete.length} item(s)?`)) return;
     try {
       const deletePromises = idsToDelete.map(id => {
-        const customerToDelete = customers.find(c => c.id === id);
+        const customerToDelete = allCustomers.find(c => c.id === id);
         const owner = isAdmin && customerToDelete.ownerId ? customerToDelete.ownerId : userId;
         if (!owner) throw new Error(`Cannot find owner for customer ID ${id}`);
         return deleteDoc(doc(db, 'users', owner, 'customers', id));
       });
       await Promise.all(deletePromises);
-      loadInitialPage();
+      loadAllCustomers();
       setSelectedIds([]);
     } catch (e) {
       setFormError('Error deleting customer(s).');
@@ -360,7 +339,6 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     const { id, ownerId, ...dataToSave } = cust;
     const owner = isAdmin && ownerId ? ownerId : userId;
     
-    // Preserve shop association when saving
     if (shopContext?.shopId && !dataToSave.shopId) {
       dataToSave.shopId = shopContext.shopId;
     }
@@ -370,6 +348,9 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         ...dataToSave, 
         updatedAt: serverTimestamp() 
       });
+      
+      // Update local state
+      setAllCustomers(p => p.map(c => c.id === id ? cust : c));
       setCustomers(p => p.map(c => c.id === id ? cust : c));
     } catch (e) { 
       setFormError('Error saving.'); 
@@ -379,12 +360,15 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const handleBulkTag = async(ids, tag) => {
     try {
       const tagPromises = ids.map(id => {
-        const customerToTag = customers.find(c => c.id === id);
+        const customerToTag = allCustomers.find(c => c.id === id);
         const owner = isAdmin && customerToTag.ownerId ? customerToTag.ownerId : userId;
         if (!owner) throw new Error(`Cannot find owner for customer ID ${id}`);
         return updateDoc(doc(db, 'users', owner, 'customers', id), { tags: [tag] });
       });
       await Promise.all(tagPromises);
+      
+      // Update local state
+      setAllCustomers(p => p.map(c => ids.includes(c.id) ? {...c, tags: [tag]} : c));
       setCustomers(p => p.map(c => ids.includes(c.id) ? {...c, tags: [tag]} : c));
       setSelectedIds([]);
     } catch(e) {
@@ -394,11 +378,9 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   };
 
   const handleBulkExport = (ids) => {
-    const rows = customers.filter(c => ids.includes(c.id));
+    const rows = allCustomers.filter(c => ids.includes(c.id));
     exportCSV("customers.csv", rows);
   };
-
-  const filteredCustomers = searchTerm ? customers.filter(c => Object.values(c).some(f => typeof f === 'string' && f.toLowerCase().includes(searchTerm.toLowerCase()))) : customers;
 
   return (
     <div className="p-4 sm:p-6">
@@ -420,8 +402,8 @@ const CustomerSection = ({ userId, user, shopContext }) => {
               id="customer-search" 
               type="text" 
               value={searchTerm} 
-              onChange={e => setSearchTerm(e.target.value)} 
-              placeholder="Quick search current page..." 
+              onChange={e => handleSearchChange(e.target.value)} 
+              placeholder="Quick search all customers..." 
               className="px-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500" 
             />
             <div className="flex justify-start md:justify-end gap-2">
@@ -467,12 +449,12 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         />
       )}
 
-      {loading && customers.length === 0 ? (
+      {loading && allCustomers.length === 0 ? (
         <div className="text-center py-10">Loading customers...</div>
       ) : (
         <>
           <CustomerList
-            customers={filteredCustomers}
+            customers={customers}
             trackingCompanies={trackingCompanies}
             handleSaveClick={handleSaveClick}
             handleDeleteClick={handleDeleteClick}
@@ -487,7 +469,10 @@ const CustomerSection = ({ userId, user, shopContext }) => {
               {Object.keys(activeFilters).length > 0 && (
                 <span className="font-medium">Filters applied • </span>
               )}
-              Showing {filteredCustomers.length} customers
+              {searchTerm && (
+                <span className="font-medium">Searching • </span>
+              )}
+              Showing {customers.length} of {totalFilteredCustomers} customers
               {shopContext && (
                 <span className="text-gray-500"> • {shopContext.shopName}</span>
               )}
@@ -498,15 +483,17 @@ const CustomerSection = ({ userId, user, shopContext }) => {
                 disabled={page <= 1 || loading} 
                 className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
               >
-                <ChevronLeft className="w-4 h-4" /> {loading && page > 1 ? 'Loading...' : 'Previous'}
+                <ChevronLeft className="w-4 h-4" /> Previous
               </button>
-              <span className="text-sm text-gray-700 font-medium">Page {page}</span>
+              <span className="text-sm text-gray-700 font-medium">
+                Page {page} of {totalPages || 1}
+              </span>
               <button 
                 onClick={handleNextPage} 
                 disabled={isLastPage || loading} 
                 className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
               >
-                {loading && page === 1 ? 'Loading...' : 'Next'} <ChevronRight className="w-4 h-4" />
+                Next <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -516,4 +503,4 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   );
 };
 
-export default CustomerSection; 
+export default CustomerSection;

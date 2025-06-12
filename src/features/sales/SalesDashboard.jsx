@@ -20,6 +20,7 @@ const initialForm = {
   products: [
     {
       product: null,
+      productInput: "",
       price: 0,
       quantity: 1,
       subtotal: 0,
@@ -27,11 +28,11 @@ const initialForm = {
   ],
 };
 
-export default function SalesDashboard({ user }) {
+export default function SalesDashboard({ user, shopContext }) {
   // --- Hooks for main data ---
   const { sales, loading, addSale, updateSale, totals, monthlyLog } = useSales(user);
+  const inventory = useInventory(user);
   const [customerQuery, setCustomerQuery] = useState("");
-  const [productQuery, setProductQuery] = useState("");
   const [customers, customersLoading] = useCustomers(user?.uid, customerQuery);
 
   // --- Modal state ---
@@ -59,39 +60,47 @@ export default function SalesDashboard({ user }) {
     setForm({
       ...initialForm,
       datetime: new Date(),
-      products: [{ product: null, price: 0, quantity: 1, subtotal: 0 }]
+      products: [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }]
     });
     setFormError("");
     setEditMode(false);
+    setEditId(null);
     setModalOpen(true);
-    setProductQuery("");
+    setCustomerQuery("");
   };
 
   const openEditModal = (sale) => {
+    // Prepare form data from existing sale
+    const saleDate = sale.datetime?.toDate ? sale.datetime.toDate()
+      : sale.date?.toDate ? sale.date.toDate()
+      : sale.createdAt?.toDate ? sale.createdAt.toDate()
+      : new Date();
+
     setForm({
-      customer: { id: sale.customerId, name: sale.customerName },
-      channel: sale.channel,
-      datetime: sale.datetime?.toDate ? sale.datetime.toDate()
-        : sale.datetime ? new Date(sale.datetime)
-        : sale.date?.toDate ? sale.date.toDate()
-        : sale.createdAt?.toDate ? sale.createdAt.toDate()
-        : new Date(),
+      customer: { 
+        id: sale.customerId, 
+        name: sale.customerName,
+        phoneNumber: sale.customerPhone || ""
+      },
+      channel: sale.channel || "",
+      datetime: saleDate,
       products: (sale.products && Array.isArray(sale.products))
         ? sale.products.map(row => ({
             product: row.productId && row.productName
               ? { id: row.productId, name: row.productName }
               : null,
-            price: Number(row.price),
-            quantity: Number(row.quantity),
+            productInput: row.productName || "",
+            price: Number(row.price || 0),
+            quantity: Number(row.quantity || 1),
             subtotal: Number(row.subtotal || row.price * row.quantity || 0),
         }))
-        : [{ product: null, price: 0, quantity: 1, subtotal: 0 }],
+        : [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }],
     });
     setEditId(sale.id);
     setEditMode(true);
     setFormError("");
     setModalOpen(true);
-    setProductQuery("");
+    setCustomerQuery(sale.customerName || "");
   };
 
   // --- Submit logic: robust validation and clean-up ---
@@ -99,19 +108,32 @@ export default function SalesDashboard({ user }) {
     e.preventDefault();
     setFormError("");
 
+    // Validation
+    if (!form.customer || !form.customer.id) {
+      setFormError("Please select a customer.");
+      return;
+    }
+    if (!form.channel) {
+      setFormError("Please select a channel.");
+      return;
+    }
+    if (!form.datetime) {
+      setFormError("Please select date and time.");
+      return;
+    }
+
     // Defensive: filter out empty/blank product rows
     const cleanProducts = (form.products || []).filter(row =>
       row.product && row.product.id && row.product.name &&
       Number(row.quantity) > 0 && Number(row.price) >= 0
     );
-    if (!form.customer || !form.channel || !form.datetime) {
-      setFormError("Please fill in all required fields.");
-      return;
-    }
+    
     if (!Array.isArray(cleanProducts) || cleanProducts.length === 0) {
       setFormError("Please add at least one product.");
       return;
     }
+
+    // Validate each product
     for (const row of cleanProducts) {
       if (!row.product || !row.product.id || !row.product.name) {
         setFormError("Each row needs a selected product.");
@@ -134,8 +156,10 @@ export default function SalesDashboard({ user }) {
     const salePayload = {
       customerId: form.customer.id,
       customerName: form.customer.name,
+      customerPhone: form.customer.phoneNumber || "",
       channel: form.channel,
       datetime: form.datetime,
+      date: form.datetime, // Keep both for compatibility
       products: cleanProducts.map(row => ({
         productId: row.product.id,
         productName: row.product.name,
@@ -147,20 +171,29 @@ export default function SalesDashboard({ user }) {
     };
 
     setSubmitting(true);
-    let ok = false;
-    if (editMode && editId) {
-      ok = await updateSale(editId, salePayload);
-    } else {
-      ok = await addSale(salePayload);
-    }
-    setSubmitting(false);
-
-    if (ok) {
-      setForm({ ...initialForm, datetime: new Date(), products: [{ product: null, price: 0, quantity: 1, subtotal: 0 }] });
-      setModalOpen(false);
-      setFormError(""); // clear error after success
-    } else {
-      setFormError("Failed to save sale. Please try again.");
+    let success = false;
+    
+    try {
+      if (editMode && editId) {
+        success = await updateSale(editId, salePayload);
+      } else {
+        success = await addSale(salePayload);
+      }
+      
+      if (success) {
+        setForm({ ...initialForm, datetime: new Date(), products: [{ product: null, productInput: "", price: 0, quantity: 1, subtotal: 0 }] });
+        setModalOpen(false);
+        setFormError("");
+        setEditMode(false);
+        setEditId(null);
+      } else {
+        setFormError(editMode ? "Failed to update sale. Please try again." : "Failed to add sale. Please try again.");
+      }
+    } catch (error) {
+      console.error("Sale submission error:", error);
+      setFormError("An error occurred. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -168,7 +201,14 @@ export default function SalesDashboard({ user }) {
     <div className="main-content">
       <div className="max-w-5xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#223163]">Sales Dashboard</h1>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-[#223163]">Sales Dashboard</h1>
+            {shopContext && (
+              <p className="text-gray-600 text-sm mt-1">
+                Sales for: <span className="font-semibold">{shopContext.shopName}</span>
+              </p>
+            )}
+          </div>
           <button
             className="bg-[#2563eb] text-white font-bold px-5 py-2 rounded-lg shadow hover:bg-[#1a4ecb] transition"
             onClick={openAddModal}
@@ -176,23 +216,37 @@ export default function SalesDashboard({ user }) {
             + Add Sale
           </button>
         </div>
+        
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           <SummaryCard label="Today" value={totals.daily} icon="💸" color="#2563eb" />
           <SummaryCard label="This Week" value={totals.weekly} icon="📆" color="#38b2ac" />
           <SummaryCard label="This Month" value={totals.monthly} icon="📈" color="#6C63FF" />
           <SummaryCard label="This Year" value={totals.yearly} icon="🎯" color="#FF6F91" />
         </div>
+        
         <SalesLineGraph
           data={chartData}
           chartView={chartView}
           setChartView={setChartView}
         />
-        <RecentSalesSection user={user} sales={sales} />
+        
+        <RecentSalesSection 
+          user={user} 
+          sales={sales} 
+          shopContext={shopContext}
+          onEditSale={openEditModal}
+        />
       </div>
+      
       <SaleModal
         open={modalOpen}
         user={user}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setEditMode(false);
+          setEditId(null);
+          setFormError("");
+        }}
         onSubmit={handleSubmit}
         form={form}
         setForm={setForm}
@@ -200,8 +254,6 @@ export default function SalesDashboard({ user }) {
         customersLoading={customersLoading}
         customerQuery={customerQuery}
         setCustomerQuery={setCustomerQuery}
-        productQuery={productQuery}
-        setProductQuery={setProductQuery}
         formError={formError}
         submitting={submitting}
         editMode={editMode}

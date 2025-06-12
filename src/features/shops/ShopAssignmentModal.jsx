@@ -9,21 +9,24 @@ const ShopAssignmentModal = ({ user, shops, onSave, onClose }) => {
   const [error, setError] = useState('');
 
   const handleSave = () => {
+    // Clear previous error
+    setError('');
+
     if (!selectedShop) {
-      setError('Please select a shop');
+      setError('Please select a shop.');
       return;
     }
 
     const shop = shops.find(s => s.shopId === selectedShop);
     if (!shop) {
-      setError('Invalid shop selected');
+      setError('Invalid shop selected.');
       return;
     }
 
     // Check if user already assigned to this shop
     const existingAssignment = user.assignedShops?.find(a => a.shopId === selectedShop);
     if (existingAssignment) {
-      setError('User is already assigned to this shop');
+      setError('User is already assigned to this shop.');
       return;
     }
 
@@ -110,3 +113,6 @@ const ShopAssignmentModal = ({ user, shops, onSave, onClose }) => {
     </div>
   );
 };
+
+// Export the component as the default export for this file.
+export default ShopAssignmentModal;

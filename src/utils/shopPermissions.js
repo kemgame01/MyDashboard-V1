@@ -1,4 +1,5 @@
 // src/utils/shopPermissions.js
+import { where, query as firestoreQuery } from 'firebase/firestore';
 
 // Define shop permissions since the shopModel doesn't exist yet
 export const SHOP_PERMISSIONS = {
@@ -125,21 +126,20 @@ export function filterByShopAccess(data, user, shopIdField = 'shopId') {
 /**
  * Build Firestore query with shop filter
  */
-export function addShopFilter(query, user, shopIdField = 'shopId') {
-  if (user?.isRootAdmin) return query;
+export function addShopFilter(baseQuery, user, shopIdField = 'shopId') {
+  if (user?.isRootAdmin) return baseQuery;
   
   const userShopIds = getUserShops(user).map(shop => shop.shopId);
   if (userShopIds.length === 0) return null;
-  
-  // For single shop, use equality filter
   if (userShopIds.length === 1) {
-    return query.where(shopIdField, '==', userShopIds[0]);
+    return firestoreQuery(baseQuery, where(shopIdField, '==', userShopIds[0]));
   }
   
-  // For multiple shops, use 'in' filter (max 10 items)
-  return query.where(shopIdField, 'in', userShopIds.slice(0, 10));
+  return firestoreQuery(
+    baseQuery,
+    where(shopIdField, 'in', userShopIds.slice(0, 10))
+  );
 }
-
 /**
  * Validate shop assignment
  */
