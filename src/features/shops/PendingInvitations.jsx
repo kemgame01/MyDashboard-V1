@@ -1,32 +1,40 @@
 // src/features/shops/PendingInvitations.jsx
 import React, { useState, useEffect } from 'react';
-import { 
-  getPendingInvitations, 
-  acceptInvitation, 
-  rejectInvitation 
-} from '../../services/shopInvitationService';
-import { Mail, Calendar, Shield, Check, X } from 'lucide-react';
+import { db } from '../../firebase';
+import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { Mail, Check, X, Clock } from 'lucide-react';
 
-const PendingInvitations = ({ user, onUpdate }) => {
+const PendingInvitations = ({ user }) => {
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
-  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (user?.email) {
-      loadInvitations();
-    }
+    loadInvitations();
   }, [user]);
 
   const loadInvitations = async () => {
+    if (!user?.email) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
-      const pending = await getPendingInvitations(user.email);
-      setInvitations(pending);
-    } catch (err) {
-      setError('Failed to load invitations');
-      console.error(err);
+      const q = query(
+        collection(db, 'shopInvitations'),
+        where('email', '==', user.email),
+        where('status', '==', 'pending')
+      );
+      
+      const snapshot = await getDocs(q);
+      const invites = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      setInvitations(invites);
+    } catch (error) {
+      console.error('Error loading invitations:', error);
     } finally {
       setLoading(false);
     }
@@ -34,57 +42,71 @@ const PendingInvitations = ({ user, onUpdate }) => {
 
   const handleAccept = async (invitation) => {
     setProcessingId(invitation.id);
-    setError('');
     
     try {
-      await acceptInvitation(invitation.id, user.uid);
-      // Remove from list
-      setInvitations(prev => prev.filter(inv => inv.id !== invitation.id));
-      // Notify parent to refresh user data
-      onUpdate && onUpdate();
-    } catch (err) {
-      setError(err.message || 'Failed to accept invitation');
+      // Update invitation status
+      await updateDoc(doc(db, 'shopInvitations', invitation.id), {
+        status: 'accepted',
+        respondedAt: new Date()
+      });
+
+      // Add user to shop
+      const shopAssignment = {
+        shopId: invitation.shopId,
+        shopName: invitation.shopName,
+        role: invitation.role,
+        isOwner: false,
+        assignedAt: new Date(),
+        assignedBy: invitation.invitedBy
+      };
+
+      // Update user's shop assignments
+      const userRef = doc(db, 'users', user.uid);
+      const updatedAssignments = [...(user.assignedShops || []), shopAssignment];
+      
+      await updateDoc(userRef, {
+        assignedShops: updatedAssignments,
+        currentShop: user.currentShop || invitation.shopId,
+        updatedAt: new Date()
+      });
+
+      // Reload invitations
+      await loadInvitations();
+      
+      // Reload page to update user context
+      window.location.reload();
+    } catch (error) {
+      console.error('Error accepting invitation:', error);
+      alert('Failed to accept invitation. Please try again.');
     } finally {
       setProcessingId(null);
     }
   };
 
   const handleReject = async (invitation) => {
-    if (!window.confirm('Are you sure you want to reject this invitation?')) {
-      return;
-    }
+    if (!window.confirm('Are you sure you want to reject this invitation?')) return;
     
     setProcessingId(invitation.id);
-    setError('');
     
     try {
-      await rejectInvitation(invitation.id, user.uid);
-      // Remove from list
-      setInvitations(prev => prev.filter(inv => inv.id !== invitation.id));
-    } catch (err) {
-      setError(err.message || 'Failed to reject invitation');
+      await updateDoc(doc(db, 'shopInvitations', invitation.id), {
+        status: 'rejected',
+        respondedAt: new Date()
+      });
+      
+      await loadInvitations();
+    } catch (error) {
+      console.error('Error rejecting invitation:', error);
+      alert('Failed to reject invitation. Please try again.');
     } finally {
       setProcessingId(null);
     }
   };
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return '';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
-    });
-  };
-
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-1/4 mb-2"></div>
-          <div className="h-10 bg-gray-200 rounded"></div>
-        </div>
+      <div className="flex justify-center items-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
       </div>
     );
   }
@@ -94,79 +116,56 @@ const PendingInvitations = ({ user, onUpdate }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow mb-6">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-          <Mail className="w-5 h-5 text-blue-600" />
-          Pending Shop Invitations ({invitations.length})
-        </h3>
-      </div>
-
-      {error && (
-        <div className="mx-6 mt-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
-          {error}
-        </div>
-      )}
-
-      <div className="divide-y divide-gray-200">
-        {invitations.map(invitation => (
-          <div key={invitation.id} className="p-6 hover:bg-gray-50">
+    <div className="mb-6 space-y-4">
+      <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        <Mail size={20} />
+        Pending Shop Invitations ({invitations.length})
+      </h3>
+      
+      <div className="space-y-3">
+        {invitations.map((invitation) => (
+          <div
+            key={invitation.id}
+            className="bg-yellow-50 border border-yellow-200 rounded-lg p-4"
+          >
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <h4 className="font-semibold text-gray-900">
-                  {invitation.shopName}
-                </h4>
-                
-                <div className="mt-2 space-y-1 text-sm text-gray-600">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4" />
-                    <span>Role: <strong>{invitation.role}</strong></span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4" />
-                    <span>Invited by: {invitation.invitedByName || invitation.invitedByEmail}</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4" />
-                    <span>Sent: {formatDate(invitation.createdAt)}</span>
-                  </div>
-                </div>
-
+                <p className="text-sm text-gray-900 font-medium">
+                  You've been invited to join <span className="font-semibold">{invitation.shopName}</span>
+                </p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Role: <span className="font-medium capitalize">{invitation.role}</span>
+                </p>
                 {invitation.message && (
-                  <div className="mt-3 p-3 bg-gray-50 rounded text-sm text-gray-700">
+                  <p className="text-sm text-gray-600 mt-2 italic">
                     "{invitation.message}"
-                  </div>
+                  </p>
                 )}
+                <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                  <Clock size={12} />
+                  Invited {new Date(invitation.createdAt.toDate()).toLocaleDateString()}
+                </p>
               </div>
-
-              <div className="ml-4 flex gap-2">
+              
+              <div className="flex items-center gap-2 ml-4">
                 <button
                   onClick={() => handleAccept(invitation)}
                   disabled={processingId === invitation.id}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                  className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                 >
-                  <Check className="w-4 h-4" />
+                  <Check size={16} />
                   Accept
                 </button>
-                
                 <button
                   onClick={() => handleReject(invitation)}
                   disabled={processingId === invitation.id}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+                  className="px-3 py-1 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                 >
-                  <X className="w-4 h-4" />
+                  <X size={16} />
                   Reject
                 </button>
               </div>
             </div>
-
-            {invitation.expiresAt && (
-              <div className="mt-3 text-xs text-gray-500">
-                Expires: {formatDate(invitation.expiresAt)}
-              </div>
-            )}
           </div>
         ))}
       </div>

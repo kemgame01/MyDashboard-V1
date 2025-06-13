@@ -1,7 +1,7 @@
 // src/utils/shopPermissions.js
 import { where, query as firestoreQuery } from 'firebase/firestore';
 
-// Default permissions for different roles
+// Shop-specific role permissions
 export const SHOP_PERMISSIONS = {
   owner: {
     canManageShop: true,
@@ -10,7 +10,10 @@ export const SHOP_PERMISSIONS = {
     canViewSales: true,
     canManageSales: true,
     canViewReports: true,
-    canDeleteShop: true
+    canDeleteShop: true,
+    canInviteStaff: true,
+    canRemoveStaff: true,
+    canEditShopDetails: true
   },
   admin: {
     canManageShop: true,
@@ -19,7 +22,10 @@ export const SHOP_PERMISSIONS = {
     canViewSales: true,
     canManageSales: true,
     canViewReports: true,
-    canDeleteShop: false
+    canDeleteShop: false,
+    canInviteStaff: true,
+    canRemoveStaff: true,
+    canEditShopDetails: true
   },
   manager: {
     canManageShop: false,
@@ -28,7 +34,10 @@ export const SHOP_PERMISSIONS = {
     canViewSales: true,
     canManageSales: true,
     canViewReports: true,
-    canDeleteShop: false
+    canDeleteShop: false,
+    canInviteStaff: false,
+    canRemoveStaff: false,
+    canEditShopDetails: false
   },
   staff: {
     canManageShop: false,
@@ -37,7 +46,10 @@ export const SHOP_PERMISSIONS = {
     canViewSales: true,
     canManageSales: false,
     canViewReports: false,
-    canDeleteShop: false
+    canDeleteShop: false,
+    canInviteStaff: false,
+    canRemoveStaff: false,
+    canEditShopDetails: false
   },
   viewer: {
     canManageShop: false,
@@ -46,19 +58,24 @@ export const SHOP_PERMISSIONS = {
     canViewSales: false,
     canManageSales: false,
     canViewReports: false,
-    canDeleteShop: false
+    canDeleteShop: false,
+    canInviteStaff: false,
+    canRemoveStaff: false,
+    canEditShopDetails: false
   }
 };
 
+// Shop Schema
 export const SHOP_SCHEMA = {
-  shopName: "Whey อร่อยดี",
-  shopId: "shop_001", 
-  ownerId: "user_admin_id", // Admin who owns this shop
-  address: "Bangkok, Thailand",
-  phone: "+66 xxx xxx xxx",
-  email: "shop@example.com",
+  shopId: "", // Auto-generated
+  shopName: "",
+  ownerId: "", // User who owns this shop
+  address: "",
+  phone: "",
+  email: "",
   status: "active", // active, inactive, suspended
   createdAt: new Date(),
+  createdBy: "", // User who created the shop
   updatedAt: new Date(),
   settings: {
     currency: "THB",
@@ -70,37 +87,31 @@ export const SHOP_SCHEMA = {
   }
 };
 
-// Updated User Schema with shop assignments
+// User Schema with shop assignments
 export const USER_SHOP_SCHEMA = {
-  // Existing user fields...
-  uid: "user_id",
-  email: "user@example.com",
-  displayName: "User Name",
-  role: "admin", // admin, manager, staff, sales, viewer
-  isRootAdmin: false,
+  uid: "", // Firebase Auth UID
+  email: "",
+  displayName: "",
+  role: "viewer", // Default global role: viewer, staff, manager, admin
+  isRootAdmin: false, // Only true for application owner
   
-  // NEW: Shop-related fields
+  // Shop-related fields
   assignedShops: [
     {
-      shopId: "shop_001",
-      shopName: "Whey อร่อยดี", 
-      role: "admin", // Role within this specific shop
-      permissions: {
-        inventory: { read: true, write: true, delete: true },
-        sales: { read: true, write: true, delete: true },
-        customers: { read: true, write: true, delete: true },
-        reports: { read: true },
-        staff: { read: true, write: true } // Can manage staff in this shop
-      },
-      isOwner: true, // Is this user the owner of this shop
+      shopId: "",
+      shopName: "", 
+      role: "", // Role within this specific shop
+      isOwner: false, // Is this user the owner of this shop
       assignedAt: new Date(),
-      assignedBy: "root_admin_id"
+      assignedBy: "" // UID of user who assigned them
     }
   ],
-  currentShop: "shop_001", // Currently active shop
+  currentShop: null, // Currently active shop ID
   
-  // Legacy global role (for backward compatibility)
-  globalRole: "admin", 
+  // User metadata
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  lastLogin: new Date(),
   blocked: false
 };
 
@@ -128,39 +139,39 @@ export function getCurrentShop(user) {
 /**
  * Check if user has permission for specific action in current shop
  */
-export function hasShopPermission(user, action, resource, shopId = null) {
+export function hasShopPermission(user, action, shopId = null) {
   // Root admin has all permissions
   if (user?.isRootAdmin) return true;
   
   const targetShopId = shopId || user?.currentShop || user?.assignedShops?.[0]?.shopId;
   if (!targetShopId) return false;
   
-  const userRole = getUserShopRole(user, targetShopId);
-  if (!userRole) return false;
+  const shopAssignment = user.assignedShops?.find(shop => shop.shopId === targetShopId);
+  if (!shopAssignment) return false;
   
-  const permissions = SHOP_PERMISSIONS[userRole];
-  return permissions?.[resource]?.[action] === true;
+  const permissions = SHOP_PERMISSIONS[shopAssignment.role];
+  return permissions?.[action] === true;
 }
 
 /**
- * Check if user can manage inventory in current shop
+ * Check if user can manage inventory in shop
  */
 export function canManageShopInventory(user, shopId = null) {
-  return hasShopPermission(user, 'write', 'inventory', shopId);
+  return hasShopPermission(user, 'canManageInventory', shopId);
 }
 
 /**
- * Check if user can view sales in current shop
+ * Check if user can view sales in shop
  */
 export function canViewShopSales(user, shopId = null) {
-  return hasShopPermission(user, 'read', 'sales', shopId);
+  return hasShopPermission(user, 'canViewSales', shopId);
 }
 
 /**
- * Check if user can manage staff in current shop
+ * Check if user can manage staff in shop
  */
 export function canManageShopStaff(user, shopId = null) {
-  return hasShopPermission(user, 'write', 'staff', shopId);
+  return hasShopPermission(user, 'canManageStaff', shopId);
 }
 
 /**
@@ -206,13 +217,14 @@ export function addShopFilter(baseQuery, user, shopIdField = 'shopId') {
   
   const userShopIds = getUserShops(user).map(shop => shop.shopId);
   if (userShopIds.length === 0) return null;
+  
   if (userShopIds.length === 1) {
     return firestoreQuery(baseQuery, where(shopIdField, '==', userShopIds[0]));
   }
   
   return firestoreQuery(
     baseQuery,
-    where(shopIdField, 'in', userShopIds.slice(0, 10))
+    where(shopIdField, 'in', userShopIds.slice(0, 10)) // Firestore 'in' limit
   );
 }
 
@@ -251,20 +263,84 @@ export function createShopAssignment(shopId, shopName, role, isOwner = false, as
   return assignment;
 }
 
-// HELPER FUNCTION for primary role change permissions
+/**
+ * Check who can change global user roles
+ */
 export const canChangeGlobalRole = (editor, targetUser) => {
   if (!editor || !targetUser) return false;
   // Only Root Admin can change global user roles
   return editor.isRootAdmin === true;
 };
 
+/**
+ * Check who can change shop-specific roles
+ */
 export const canChangeShopRole = (editor, targetUser, shopId) => {
-  if (!editor || !targetUser) return false;
+  if (!editor || !targetUser || !shopId) return false;
+  
   // Root Admin can change any shop role
   if (editor.isRootAdmin) return true;
+  
   // Shop owner can change roles for users in their shop
   const isOwnerOfShop = editor.assignedShops?.some(shop => 
     shop.shopId === shopId && shop.isOwner
   );
-  return isOwnerOfShop;
+  
+  // Shop admins can also manage staff (but not other admins/owners)
+  const isAdminOfShop = editor.assignedShops?.some(shop => 
+    shop.shopId === shopId && shop.role === 'admin'
+  );
+  
+  if (isOwnerOfShop || isAdminOfShop) {
+    // Cannot change role of shop owner unless you're root admin
+    const targetIsOwner = targetUser.assignedShops?.some(shop => 
+      shop.shopId === shopId && shop.isOwner
+    );
+    return !targetIsOwner || editor.isRootAdmin;
+  }
+  
+  return false;
+};
+
+/**
+ * Check who can view Role Management section
+ */
+export const canViewRoleManagement = (user) => {
+  if (!user) return false;
+  
+  // Root Admin can always view
+  if (user.isRootAdmin) return true;
+  
+  // Shop owners can view
+  const hasOwnedShops = user.assignedShops?.some(shop => shop.isOwner);
+  return hasOwnedShops;
+};
+
+/**
+ * Check who can view Shop Management section
+ */
+export const canViewShopManagement = (user) => {
+  if (!user) return false;
+  
+  // Root Admin can always view
+  if (user.isRootAdmin) return true;
+  
+  // Shop owners can view
+  const hasOwnedShops = user.assignedShops?.some(shop => shop.isOwner);
+  return hasOwnedShops;
+};
+
+/**
+ * Get shops user can manage
+ */
+export const getManagedShops = (user) => {
+  if (!user) return [];
+  
+  // Root Admin can manage all shops (will be filtered in component)
+  if (user.isRootAdmin) return 'all';
+  
+  // Return shops where user is owner or admin
+  return user.assignedShops?.filter(shop => 
+    shop.isOwner || shop.role === 'admin'
+  ) || [];
 };

@@ -12,13 +12,13 @@ service cloud.firestore {
     }
 
     function isShopOwner(shopId) {
-  return isRootAdmin() ||
-    (
-      isSignedIn() &&
-      exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedShopIds.hasAny([shopId])
-    );
-}
+      return isRootAdmin() ||
+        (
+          isSignedIn() &&
+          exists(/databases/$(database)/documents/shops/$(shopId)) &&
+          get(/databases/$(database)/documents/shops/$(shopId)).data.shopOwner == request.auth.uid
+        );
+    }
     
     function hasShopAccess(shopId) {
   return isShopOwner(shopId);

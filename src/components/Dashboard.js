@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import Sidebar from '../features/layout/Sidebar';
 import CustomerSection from '../features/customers/CustomerSection';
 import RoleManagementSection from '../features/users/RoleManagementSection';
@@ -12,9 +13,16 @@ import SalesDashboard from '../features/sales/SalesDashboard';
 import CategoryBrandManager from './CategoryBrandManager';
 import ShopManager from '../features/shops/ShopManager';
 import UserProfile from '../features/userprofile/UserProfile';
-import { canViewShopSales, canManageShopInventory, canManageShopStaff } from "../utils/shopPermissions";
+import { 
+  canViewShopSales, 
+  canManageShopInventory, 
+  canManageShopStaff,
+  canViewRoleManagement,
+  canViewShopManagement,
+  getCurrentShop 
+} from "../utils/shopPermissions";
 import PendingInvitations from "../features/shops/PendingInvitations";
-
+import { ShopSelector } from '../features/shops/ShopManagementComponents';
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
@@ -33,6 +41,29 @@ const Dashboard = ({ user }) => {
       setShopContext(shop);
     }
   }, [user]);
+
+  const handleShopChange = async (shopId) => {
+    if (!user || !shopId) return;
+    
+    try {
+      // Update user's current shop in Firestore
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        currentShop: shopId,
+        updatedAt: new Date()
+      });
+      
+      // Update local state
+      const newShop = user.assignedShops.find(s => s.shopId === shopId);
+      setShopContext(newShop);
+      
+      // Reload page to refresh all data with new shop context
+      window.location.reload();
+    } catch (error) {
+      console.error('Error changing shop:', error);
+      alert('Failed to change shop. Please try again.');
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -72,8 +103,8 @@ const Dashboard = ({ user }) => {
   const hasAccessToSection = (section) => {
     if (isRootAdmin) return true;
     
-    // Non-admins with no shops can only see their profile or setup screen
-    if (!shopContext && section !== 'userProfile' && section !== 'setup') {
+    // Non-admins with no shops can only see their profile
+    if (!shopContext && section !== 'userProfile') {
       return false;
     }
     
@@ -121,44 +152,6 @@ const Dashboard = ({ user }) => {
     }
   };
 
-  const ShopSelector = ({ user }) => {
-    if (!user?.assignedShops || user.assignedShops.length === 0) return null;
-
-    const handleShopChange = async (shopId) => {
-      const shop = user.assignedShops.find(s => s.shopId === shopId);
-      if (shop) {
-        setShopContext(shop);
-        // You might want to update user's currentShop in Firestore here
-      }
-    };
-
-    if (user.assignedShops.length === 1) {
-      return (
-        <div className="flex items-center text-sm text-gray-600">
-          <span className="mr-2">Shop:</span>
-          <span className="font-semibold">{user.assignedShops[0].shopName}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center">
-        <label className="text-sm text-gray-600 mr-2">Shop:</label>
-        <select
-          value={shopContext?.shopId || ''}
-          onChange={(e) => handleShopChange(e.target.value)}
-          className="text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {user.assignedShops.map(shop => (
-            <option key={shop.shopId} value={shop.shopId}>
-              {shop.shopName} {shop.isOwner ? '(Owner)' : `(${shop.role})`}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  };
-
   // No need for header when sections handle their own layout
   if (activeSection === 'roleManagement') {
     return (
@@ -189,7 +182,7 @@ const Dashboard = ({ user }) => {
         <header className="bg-white shadow-sm border-b">
           <div className="px-6 py-4 flex justify-between items-center">
             <h1 className="text-2xl font-semibold text-gray-800">{currentSection.label}</h1>
-            <ShopSelector user={user} />
+            <ShopSelector user={user} onShopChange={handleShopChange} />
           </div>
         </header>
         <main className="p-6">

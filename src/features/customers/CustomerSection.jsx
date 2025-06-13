@@ -1,3 +1,4 @@
+// src/features/customers/CustomerSection.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   collection, query, orderBy, limit, startAfter, endBefore, limitToLast,
@@ -12,13 +13,12 @@ import TagChangeConfirmModal from './TagChangeConfirmModal';
 import { exportCSV } from '../../utils/exportCSV';
 import CustomerControlsDisclosure from "./CustomerControlsDisclosure";
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { filterByShopAccess, addShopFilter } from '../../utils/shopPermissions';
 
 const PAGE_SIZE = 15;
 
 const CustomerSection = ({ userId, user, shopContext }) => { 
   const [customers, setCustomers] = useState([]);
-  const [allCustomers, setAllCustomers] = useState([]); // Store all customers for filtering
+  const [allCustomers, setAllCustomers] = useState([]);
   const [trackingCompanies, setTrackingCompanies] = useState([]);
   const [newCustomer, setNewCustomer] = useState({});
   const [isAdding, setIsAdding] = useState(false);
@@ -42,8 +42,10 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   
   const [activeFilters, setActiveFilters] = useState({});
   
-  const isAdmin = useMemo(() => user?.role === 'admin' || user?.isRootAdmin === true, [user]);
-  
+  const isRootAdmin = user?.isRootAdmin === true;
+  const isShopOwner = user?.assignedShops?.some(shop => shop.isOwner) || false;
+  const currentShopId = shopContext?.shopId;
+
   // Get unique tags from customers
   const availableTags = useMemo(() => {
     const tags = new Set(['New', 'Active', 'Inactive', 'VIP']);
@@ -58,19 +60,12 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const mapCustomerData = (doc) => ({
     id: doc.id,
     ...doc.data(),
-    ownerId: doc.ref.parent.parent.id,
+    shopId: doc.ref.parent.parent.id, // Shop ID from the path
   });
   
   // Client-side filtering function
   const applyClientSideFilters = useCallback((customers) => {
-    let filtered = customers;
-    
-    // Apply shop-based filtering for non-admins
-    if (!isAdmin) {
-      filtered = filterByShopAccess(filtered, user, 'shopId');
-    }
-    
-    return filtered.filter(customer => {
+    return customers.filter(customer => {
       // Tag filter
       if (activeFilters.tag && activeFilters.tag !== 'all') {
         if (!customer.tags || !customer.tags.includes(activeFilters.tag)) {
@@ -132,39 +127,62 @@ const CustomerSection = ({ userId, user, shopContext }) => {
       
       return true;
     });
-  }, [activeFilters, isAdmin, user, searchTerm]);
+  }, [activeFilters, searchTerm]);
 
   // Load all customers initially
   const loadAllCustomers = useCallback(async () => {
-    if (!userId && !isAdmin) return;
-    
     setLoading(true);
+    setFormError('');
+    
     try {
-      let baseQuery;
-      if (isAdmin) {
-        baseQuery = query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'));
-      } else {
-        baseQuery = query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'));
+      let allData = [];
+
+      if (isRootAdmin) {
+        // Root admin can see all customers from all shops
+        const shopsSnapshot = await getDocs(collection(db, 'shops'));
+        
+        for (const shopDoc of shopsSnapshot.docs) {
+          const customersRef = collection(db, 'shops', shopDoc.id, 'customers');
+          const customersSnapshot = await getDocs(query(customersRef, orderBy('createdAt', 'desc')));
+          const shopCustomers = customersSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            shopId: shopDoc.id,
+            shopName: shopDoc.data().shopName
+          }));
+          allData = [...allData, ...shopCustomers];
+        }
+      } else if (currentShopId) {
+        // Regular users see customers from their current shop
+        const customersRef = collection(db, 'shops', currentShopId, 'customers');
+        const q = query(customersRef, orderBy('createdAt', 'desc'));
+        const snapshot = await getDocs(q);
+        allData = snapshot.docs.map(mapCustomerData);
+      } else if (user?.assignedShops?.length > 0) {
+        // If no shop selected but user has shops, load from all assigned shops
+        for (const shop of user.assignedShops) {
+          const customersRef = collection(db, 'shops', shop.shopId, 'customers');
+          const q = query(customersRef, orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          const shopCustomers = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            shopId: shop.shopId,
+            shopName: shop.shopName
+          }));
+          allData = [...allData, ...shopCustomers];
+        }
       }
-      
-      // Apply shop filter if needed
-      if (!isAdmin && shopContext?.shopId) {
-        baseQuery = addShopFilter(baseQuery, user, 'shopId') || baseQuery;
-      }
-      
-      const snapshot = await getDocs(baseQuery);
-      const allData = snapshot.docs.map(mapCustomerData);
+
       setAllCustomers(allData);
-      
-      // Apply filters and pagination
       updateDisplayedCustomers(allData);
     } catch (err) {
       console.error("Error fetching customers: ", err);
-      setFormError("Failed to load customers.");
+      setFormError("Failed to load customers. Please check your permissions.");
     } finally {
       setLoading(false);
     }
-  }, [userId, isAdmin, shopContext, user]);
+  }, [currentShopId, isRootAdmin, user]);
 
   // Update displayed customers based on filters and pagination
   const updateDisplayedCustomers = useCallback((customersData) => {
@@ -183,8 +201,12 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     loadAllCustomers();
     
     const fetchTrackingCompanies = async () => {
-      const companiesSnapshot = await getDocs(collection(db, 'trackingCompanies'));
-      setTrackingCompanies(companiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      try {
+        const companiesSnapshot = await getDocs(collection(db, 'trackingCompanies'));
+        setTrackingCompanies(companiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (err) {
+        console.error('Error fetching tracking companies:', err);
+      }
     };
     fetchTrackingCompanies();
   }, [loadAllCustomers]);
@@ -197,14 +219,15 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   // Reload when shop context changes
   useEffect(() => {
     if (shopContext) {
+      setPage(1); // Reset to first page
       loadAllCustomers();
     }
-  }, [shopContext, loadAllCustomers]);
+  }, [shopContext?.shopId]); // Only reload when shopId changes
 
   // Apply filters - ALWAYS reset to page 1
   const handleApplyFilters = () => {
     setActiveFilters({ ...filters });
-    setPage(1); // Reset to page 1
+    setPage(1);
     updateDisplayedCustomers();
   };
   
@@ -220,14 +243,14 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     };
     setFilters(resetFilters);
     setActiveFilters({});
-    setPage(1); // Reset to page 1
+    setPage(1);
     updateDisplayedCustomers();
   };
 
   // Search handler - reset to page 1
   const handleSearchChange = (value) => {
     setSearchTerm(value);
-    setPage(1); // Reset to page 1 when searching
+    setPage(1);
   };
 
   // Pagination handlers
@@ -250,23 +273,37 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const handleInitiateTagChange = (customerId, newTag, currentTag) => {
     if (newTag === currentTag) return;
     const customerToUpdate = customers.find(c => c.id === customerId);
-    setTagChangeInfo({ customerId, newTag, ownerId: customerToUpdate.ownerId });
+    setTagChangeInfo({ 
+      customerId, 
+      newTag, 
+      shopId: customerToUpdate.shopId,
+      customerName: `${customerToUpdate.firstName} ${customerToUpdate.lastName}`
+    });
   };
 
   const handleConfirmTagChange = async () => {
     if (!tagChangeInfo) return;
-    const { customerId, newTag, ownerId } = tagChangeInfo;
-    const owner = isAdmin && ownerId ? ownerId : userId;
+    const { customerId, newTag, shopId } = tagChangeInfo;
+    
     try {
-      const customerDocRef = doc(db, 'users', owner, 'customers', customerId);
-      await updateDoc(customerDocRef, { tags: [newTag] });
+      const customerDocRef = doc(db, 'shops', shopId, 'customers', customerId);
+      await updateDoc(customerDocRef, { 
+        tags: [newTag],
+        updatedAt: serverTimestamp()
+      });
       
       // Update local state
-      setAllCustomers(prev => prev.map(c => c.id === customerId ? { ...c, tags: [newTag] } : c));
-      setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, tags: [newTag] } : c));
+      setAllCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, tags: [newTag] } : c
+      ));
+      setCustomers(prev => prev.map(c => 
+        c.id === customerId ? { ...c, tags: [newTag] } : c
+      ));
+      
+      setFormError(''); // Clear any previous errors
     } catch (error) {
       console.error("Error updating tag:", error);
-      setFormError("Could not update the tag. Please try again.");
+      setFormError("Could not update the tag. Please check your permissions.");
     } finally {
       setTagChangeInfo(null);
     }
@@ -278,6 +315,12 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   
   const handleAddCustomerSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!currentShopId) {
+      setFormError('Please select a shop first.');
+      return;
+    }
+    
     if (!newCustomer.firstName || !newCustomer.email) { 
       setFormError('Name and email required.'); 
       return; 
@@ -286,131 +329,190 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     try {
       const customerData = { 
         ...newCustomer, 
-        createdAt: serverTimestamp(), 
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         tags: ['New'],
-        shopId: shopContext?.shopId || null
+        addedBy: userId,
+        addedByName: user.displayName || user.email
       };
       
-      await addDoc(collection(db, 'users', userId, 'customers'), customerData);
+      const customersRef = collection(db, 'shops', currentShopId, 'customers');
+      await addDoc(customersRef, customerData);
+      
       setIsAdding(false); 
       setNewCustomer({}); 
+      setFormError('');
       loadAllCustomers();
     } catch (e) { 
-      setFormError('Error adding customer.') 
+      console.error('Error adding customer:', e);
+      setFormError('Error adding customer. Please check your permissions.');
     }
   };
 
   const handleQuickAdd = async (data) => {
+    if (!currentShopId) {
+      setFormError('Please select a shop first.');
+      return;
+    }
+    
     try {
       const customerData = { 
         ...data, 
-        createdAt: serverTimestamp(), 
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         tags: ['New'],
-        shopId: shopContext?.shopId || null
+        addedBy: userId,
+        addedByName: user.displayName || user.email
       };
       
-      await addDoc(collection(db, 'users', userId, 'customers'), customerData);
+      const customersRef = collection(db, 'shops', currentShopId, 'customers');
+      await addDoc(customersRef, customerData);
+      
+      setFormError('');
       loadAllCustomers();
     } catch (e) { 
-      setFormError('Error adding customer.') 
+      console.error('Error adding customer:', e);
+      setFormError('Error adding customer. Please check your permissions.');
     }
   };
 
   const handleDeleteClick = async (ids) => {
     const idsToDelete = Array.isArray(ids) ? ids : [ids];
-    if (!window.confirm(`Delete ${idsToDelete.length} item(s)?`)) return;
+    if (!window.confirm(`Delete ${idsToDelete.length} customer(s)?`)) return;
+    
     try {
       const deletePromises = idsToDelete.map(id => {
         const customerToDelete = allCustomers.find(c => c.id === id);
-        const owner = isAdmin && customerToDelete.ownerId ? customerToDelete.ownerId : userId;
-        if (!owner) throw new Error(`Cannot find owner for customer ID ${id}`);
-        return deleteDoc(doc(db, 'users', owner, 'customers', id));
+        if (!customerToDelete || !customerToDelete.shopId) {
+          throw new Error(`Cannot find shop for customer ID ${id}`);
+        }
+        return deleteDoc(doc(db, 'shops', customerToDelete.shopId, 'customers', id));
       });
+      
       await Promise.all(deletePromises);
       loadAllCustomers();
       setSelectedIds([]);
+      setFormError('');
     } catch (e) {
-      setFormError('Error deleting customer(s).');
+      setFormError('Error deleting customer(s). Please check your permissions.');
       console.error(e);
     }
   };
   
   const handleSaveClick = async (cust) => {
-    const { id, ownerId, ...dataToSave } = cust;
-    const owner = isAdmin && ownerId ? ownerId : userId;
+    const { id, shopId, shopName, ...dataToSave } = cust;
     
-    if (shopContext?.shopId && !dataToSave.shopId) {
-      dataToSave.shopId = shopContext.shopId;
+    if (!shopId) {
+      setFormError('Cannot update customer: Shop information missing.');
+      return;
     }
     
     try {
-      await updateDoc(doc(db, 'users', owner, 'customers', id), { 
+      await updateDoc(doc(db, 'shops', shopId, 'customers', id), { 
         ...dataToSave, 
         updatedAt: serverTimestamp() 
       });
       
       // Update local state
-      setAllCustomers(p => p.map(c => c.id === id ? cust : c));
-      setCustomers(p => p.map(c => c.id === id ? cust : c));
-    } catch (e) { 
-      setFormError('Error saving.'); 
+      setAllCustomers(p => p.map(c => c.id === id ? { ...cust, updatedAt: new Date() } : c));
+      setCustomers(p => p.map(c => c.id === id ? { ...cust, updatedAt: new Date() } : c));
+      setFormError('');
+    } catch (error) {
+      setFormError('Error updating customer. Please check your permissions.');
+      console.error('Error updating customer:', error);
     }
   };
 
-  const handleBulkTag = async(ids, tag) => {
+  const handleBulkExport = () => {
+    if (selectedIds.length === 0) return;
+    const dataToExport = allCustomers.filter(c => selectedIds.includes(c.id));
+    exportCSV(dataToExport, `customers_export_${new Date().toISOString().split('T')[0]}.csv`);
+    setSelectedIds([]);
+  };
+
+  const handleBulkTag = async (newTag) => {
+    if (selectedIds.length === 0) return;
+    
     try {
-      const tagPromises = ids.map(id => {
-        const customerToTag = allCustomers.find(c => c.id === id);
-        const owner = isAdmin && customerToTag.ownerId ? customerToTag.ownerId : userId;
-        if (!owner) throw new Error(`Cannot find owner for customer ID ${id}`);
-        return updateDoc(doc(db, 'users', owner, 'customers', id), { tags: [tag] });
+      const updatePromises = selectedIds.map(id => {
+        const customer = allCustomers.find(c => c.id === id);
+        if (!customer || !customer.shopId) return Promise.resolve();
+        
+        return updateDoc(
+          doc(db, 'shops', customer.shopId, 'customers', id), 
+          { 
+            tags: [newTag],
+            updatedAt: serverTimestamp()
+          }
+        );
       });
-      await Promise.all(tagPromises);
       
-      // Update local state
-      setAllCustomers(p => p.map(c => ids.includes(c.id) ? {...c, tags: [tag]} : c));
-      setCustomers(p => p.map(c => ids.includes(c.id) ? {...c, tags: [tag]} : c));
+      await Promise.all(updatePromises);
+      loadAllCustomers();
       setSelectedIds([]);
-    } catch(e) {
-      setFormError("Error tagging.");
-      console.error(e);
+      setFormError('');
+    } catch (error) {
+      setFormError('Error updating tags. Please check your permissions.');
+      console.error('Error bulk tagging:', error);
     }
-  };
-
-  const handleBulkExport = (ids) => {
-    const rows = allCustomers.filter(c => ids.includes(c.id));
-    exportCSV("customers.csv", rows);
   };
 
   return (
-    <div className="p-4 sm:p-6">
-      <TagChangeConfirmModal tagChangeInfo={tagChangeInfo} onConfirm={handleConfirmTagChange} onCancel={handleCancelTagChange} />
-      
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold text-gray-800 mb-2">Customers</h2>
-        {shopContext && (
-          <p className="text-gray-600 text-sm">
+    <div className="p-4">
+      {/* Tag Change Confirmation Modal */}
+      {tagChangeInfo && (
+        <TagChangeConfirmModal
+          isOpen={!!tagChangeInfo}
+          onClose={handleCancelTagChange}
+          onConfirm={handleConfirmTagChange}
+          customerName={tagChangeInfo.customerName}
+          newTag={tagChangeInfo.newTag}
+        />
+      )}
+
+      {/* Header */}
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Customer Management</h2>
+        {currentShopId && shopContext && (
+          <div className="text-sm text-gray-600">
             Managing customers for: <span className="font-semibold">{shopContext.shopName}</span>
-          </p>
+          </div>
+        )}
+        {!currentShopId && !isRootAdmin && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+            Please select a shop to manage customers.
+          </div>
         )}
       </div>
-      
+
+      {/* Form Error */}
+      {formError && (
+        <div className="mb-4 p-3 bg-red-100 border border-red-200 rounded-lg text-red-700">
+          {formError}
+        </div>
+      )}
+
+      {/* Controls */}
       <div className="mb-4">
-        <CustomerControlsDisclosure>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center mb-4">
-            <input 
-              id="customer-search" 
-              type="text" 
-              value={searchTerm} 
-              onChange={e => handleSearchChange(e.target.value)} 
-              placeholder="Quick search all customers..." 
-              className="px-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500" 
-            />
-            <div className="flex justify-start md:justify-end gap-2">
+        <CustomerControlsDisclosure
+          searchTerm={searchTerm}
+          onSearchChange={handleSearchChange}
+          selectedIds={selectedIds}
+          onBulkDelete={() => handleDeleteClick(selectedIds)}
+          onBulkExport={handleBulkExport}
+          onBulkTag={handleBulkTag}
+          tags={availableTags}
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-4">
+            <div className="text-sm text-gray-600">
+              Total customers: {allCustomers.length}
+              {Object.keys(activeFilters).length > 0 && ' (filtered)'}
+            </div>
+            <div className="flex gap-3">
               <button 
                 onClick={() => setShowFilters(!showFilters)} 
                 type="button" 
-                className="bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-gray-700 transition shadow-sm"
+                className="bg-gray-200 text-gray-700 font-semibold py-2 px-5 rounded-lg hover:bg-gray-300 transition shadow-sm"
               >
                 {showFilters ? 'Hide Filters' : 'Show Filters'}
               </button>
@@ -418,6 +520,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
                 onClick={() => setIsAdding(!isAdding)} 
                 type="button" 
                 className="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg hover:bg-blue-700 transition shadow-sm"
+                disabled={!currentShopId && !isRootAdmin}
               >
                 {isAdding ? 'Close Form' : 'Add New Customer'}
               </button>
@@ -436,6 +539,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         </CustomerControlsDisclosure>
       </div>
 
+      {/* Add Customer Form */}
       {isAdding && (
         <CustomerForm 
           newCustomer={newCustomer} 
@@ -449,6 +553,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         />
       )}
 
+      {/* Customer List */}
       {loading && allCustomers.length === 0 ? (
         <div className="text-center py-10">Loading customers...</div>
       ) : (
@@ -464,6 +569,8 @@ const CustomerSection = ({ userId, user, shopContext }) => {
             handleBulkTag={handleBulkTag}
             handleInitiateTagChange={handleInitiateTagChange} 
           />
+          
+          {/* Pagination */}
           <div className="flex justify-between items-center mt-4">
             <div className="text-sm text-gray-600">
               {Object.keys(activeFilters).length > 0 && (

@@ -1,13 +1,17 @@
 // src/features/shops/ShopManager.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
-import { Store, MapPin, Phone, Mail, Clock, Settings, Trash2, Edit, Plus, BarChart } from 'lucide-react';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { Trash2, Edit, Plus, Store, Users, Settings, AlertCircle } from 'lucide-react';
+import ShopForm from './ShopForm';
+import ShopAnalytics from './ShopAnalytics';
+import { canViewShopManagement } from '../../utils/shopPermissions';
+import Spinner from '../../components/Spinner';
 
 const ShopManager = ({ user }) => {
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingShop, setEditingShop] = useState(null);
   const [deletingShop, setDeletingShop] = useState(null);
@@ -15,41 +19,30 @@ const ShopManager = ({ user }) => {
 
   const isRootAdmin = user?.isRootAdmin === true;
   const isShopOwner = user?.assignedShops?.some(shop => shop.isOwner) || false;
-  
-  // Determine what shops the user can see
-  const getVisibleShops = useCallback(async () => {
-    try {
-      const shopsCollection = collection(db, 'shops');
-      const snapshot = await getDocs(shopsCollection);
-      let allShops = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
 
+  // Check if user should have access to this section
+  useEffect(() => {
+    if (!canViewShopManagement(user)) {
+      setError("You don't have permission to view this section.");
+    }
+  }, [user]);
+
+  // Load shops based on user permissions
+  const loadShops = async () => {
+    try {
+      setError('');
+      const snapshot = await getDocs(collection(db, 'shops'));
+      let allShops = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
       if (!isRootAdmin) {
-        // Shop owners only see their owned shops
+        // Shop owners only see their own shops
         const ownedShopIds = user.assignedShops
           ?.filter(s => s.isOwner)
           .map(s => s.shopId) || [];
         allShops = allShops.filter(shop => ownedShopIds.includes(shop.id));
       }
-
-      return allShops;
-    } catch (err) {
-      console.error('Error fetching shops:', err);
-      throw err;
-    }
-  }, [user, isRootAdmin]);
-
-  useEffect(() => {
-    loadShops();
-  }, []);
-
-  const loadShops = async () => {
-    try {
-      setLoading(true);
-      const visibleShops = await getVisibleShops();
-      setShops(visibleShops);
+      
+      setShops(allShops);
     } catch (err) {
       setError('Failed to load shops');
       console.error(err);
@@ -58,6 +51,11 @@ const ShopManager = ({ user }) => {
     }
   };
 
+  useEffect(() => {
+    loadShops();
+  }, [user]);
+
+  // Permission checks for actions
   const canEditShop = (shop) => {
     if (isRootAdmin) return true;
     // Shop owners can edit their own shops
@@ -102,18 +100,20 @@ const ShopManager = ({ user }) => {
           ...formData,
           createdAt: new Date(),
           createdBy: user.uid,
-          shopOwner: isRootAdmin ? formData.shopOwner || user.uid : user.uid
+          ownerId: user.uid, // Creator becomes the owner
+          status: 'active',
+          updatedAt: new Date()
         };
         
         const docRef = await addDoc(collection(db, 'shops'), newShopData);
         
-        // If non-root admin creates a shop, automatically assign them as owner
-        if (!isRootAdmin) {
+        // Automatically assign creator as shop owner
+        if (!isRootAdmin || user.uid === formData.ownerId) {
           const userRef = doc(db, 'users', user.uid);
           const shopAssignment = {
             shopId: docRef.id,
             shopName: formData.shopName,
-            role: 'admin',
+            role: 'owner',
             isOwner: true,
             assignedAt: new Date(),
             assignedBy: user.uid
@@ -122,7 +122,8 @@ const ShopManager = ({ user }) => {
           const updatedAssignments = [...(user.assignedShops || []), shopAssignment];
           await updateDoc(userRef, {
             assignedShops: updatedAssignments,
-            currentShop: user.currentShop || docRef.id
+            currentShop: user.currentShop || docRef.id,
+            updatedAt: new Date()
           });
         }
       }
@@ -156,20 +157,39 @@ const ShopManager = ({ user }) => {
     }
   };
 
+  if (!canViewShopManagement(user)) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Store className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+          <p className="text-gray-600">You don't have permission to access Shop Management.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
-    return <div className="flex justify-center items-center h-64">Loading shops...</div>;
+    return <Spinner text="Loading shops..." />;
   }
 
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6 flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Shop Management</h2>
+        <div>
+          <h2 className="text-2xl font-bold">Shop Management</h2>
+          <p className="text-gray-600 mt-1">
+            {isRootAdmin 
+              ? "Manage all shops in the system"
+              : "Manage your shops"}
+          </p>
+        </div>
         <div className="flex gap-3">
           {canCreateShop() && (
             <button
               onClick={() => setShowForm(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
             >
+              <Plus size={20} />
               Create Shop
             </button>
           )}
@@ -177,121 +197,104 @@ const ShopManager = ({ user }) => {
             onClick={() => setShowAnalytics(!showAnalytics)}
             className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
           >
-            {showAnalytics ? 'Hide' : 'Show'} Analytics
+            {showAnalytics ? 'Hide Analytics' : 'Show Analytics'}
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="mb-4 p-4 bg-red-100 text-red-700 rounded-lg">
-          {error}
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center">
+          <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+          <p className="text-red-800">{error}</p>
         </div>
       )}
 
-      {showAnalytics && (
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-lg shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm">Total Shops</p>
-                <p className="text-2xl font-bold">{shops.length}</p>
-              </div>
-              <Store className="w-8 h-8 text-blue-500" />
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm">Active Shops</p>
-                <p className="text-2xl font-bold">{shops.filter(s => s.status === 'active').length}</p>
-              </div>
-              <BarChart className="w-8 h-8 text-green-500" />
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm">Inactive Shops</p>
-                <p className="text-2xl font-bold">{shops.filter(s => s.status === 'inactive').length}</p>
-              </div>
-              <BarChart className="w-8 h-8 text-gray-500" />
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm">Total Revenue</p>
-                <p className="text-2xl font-bold">฿0</p>
-              </div>
-              <BarChart className="w-8 h-8 text-purple-500" />
-            </div>
-          </div>
-        </div>
-      )}
+      {showAnalytics && <ShopAnalytics shops={shops} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {shops.map(shop => (
-          <div key={shop.id} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+          <div key={shop.id} className="bg-white rounded-lg shadow-md p-6">
             <div className="flex justify-between items-start mb-4">
-              <h3 className="text-xl font-semibold">{shop.shopName}</h3>
-              <span className={`px-2 py-1 text-xs rounded-full ${
-                shop.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-              }`}>
-                {shop.status}
-              </span>
+              <div>
+                <h3 className="text-xl font-semibold">{shop.shopName}</h3>
+                <span className={`inline-block px-2 py-1 text-xs rounded ${
+                  shop.status === 'active' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-red-100 text-red-800'
+                }`}>
+                  {shop.status || 'active'}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                {canEditShop(shop) && (
+                  <button
+                    onClick={() => {
+                      setEditingShop(shop);
+                      setShowForm(true);
+                    }}
+                    className="text-blue-600 hover:text-blue-800"
+                    title="Edit Shop"
+                  >
+                    <Edit size={20} />
+                  </button>
+                )}
+                {canDeleteShop(shop) && (
+                  <button
+                    onClick={() => setDeletingShop(shop)}
+                    className="text-red-600 hover:text-red-800"
+                    title="Delete Shop"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                )}
+              </div>
             </div>
-            
+
             <div className="space-y-2 text-sm text-gray-600">
               <div className="flex items-center gap-2">
-                <MapPin className="w-4 h-4" />
+                <Store size={16} />
                 <span>{shop.address || 'No address'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Phone className="w-4 h-4" />
-                <span>{shop.phone || 'No phone'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Mail className="w-4 h-4" />
-                <span>{shop.email || 'No email'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4" />
+                <Users size={16} />
                 <span>
-                  {shop.settings?.businessHours?.open || '09:00'} - {shop.settings?.businessHours?.close || '18:00'}
+                  {user.assignedShops?.find(s => s.shopId === shop.id)?.role || 'No role'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Settings size={16} />
+                <span>
+                  {shop.settings?.businessHours?.open || '09:00'} - 
+                  {shop.settings?.businessHours?.close || '18:00'}
                 </span>
               </div>
             </div>
-            
-            <div className="mt-4 flex gap-2">
-              {canEditShop(shop) && (
-                <button
-                  onClick={() => {
-                    setEditingShop(shop);
-                    setShowForm(true);
-                  }}
-                  className="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Edit
-                </button>
-              )}
-              {canDeleteShop(shop) && (
-                <button
-                  onClick={() => setDeletingShop(shop)}
-                  className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700"
-                >
-                  Delete
-                </button>
-              )}
-            </div>
+
+            {shop.createdAt && (
+              <p className="text-xs text-gray-400 mt-4">
+                Created: {new Date(shop.createdAt.toDate ? shop.createdAt.toDate() : shop.createdAt).toLocaleDateString()}
+              </p>
+            )}
           </div>
         ))}
       </div>
+
+      {shops.length === 0 && (
+        <div className="text-center py-12">
+          <Store className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+          <p className="text-gray-500">
+            {canCreateShop() 
+              ? "No shops yet. Create your first shop!" 
+              : "You don't have any shops assigned."}
+          </p>
+        </div>
+      )}
 
       {/* Shop Form Modal */}
       {showForm && (
         <ShopForm
           shop={editingShop}
-          onSubmit={handleSubmit}
+          onSave={handleSubmit}
           onClose={() => {
             setShowForm(false);
             setEditingShop(null);
@@ -299,207 +302,31 @@ const ShopManager = ({ user }) => {
         />
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation */}
       {deletingShop && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold mb-4">Delete Shop</h3>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4">Delete Shop</h3>
             <p className="text-gray-600 mb-6">
               Are you sure you want to delete "{deletingShop.shopName}"? This action cannot be undone.
             </p>
-            <div className="flex gap-3">
+            <div className="flex justify-end gap-3">
               <button
                 onClick={() => setDeletingShop(null)}
-                className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDelete}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
-                Delete
+                Delete Shop
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-};
-
-// Shop Form Component
-const ShopForm = ({ shop, onSubmit, onClose }) => {
-  const [formData, setFormData] = useState({
-    shopName: shop?.shopName || '',
-    address: shop?.address || '',
-    phone: shop?.phone || '',
-    email: shop?.email || '',
-    status: shop?.status || 'active',
-    settings: {
-      currency: shop?.settings?.currency || 'THB',
-      timezone: shop?.settings?.timezone || 'Asia/Bangkok',
-      businessHours: {
-        open: shop?.settings?.businessHours?.open || '09:00',
-        close: shop?.settings?.businessHours?.close || '18:00'
-      }
-    }
-  });
-
-  const handleChange = (field, value) => {
-    if (field.includes('.')) {
-      const [parent, child, subchild] = field.split('.');
-      if (subchild) {
-        setFormData(prev => ({
-          ...prev,
-          [parent]: {
-            ...prev[parent],
-            [child]: {
-              ...prev[parent][child],
-              [subchild]: value
-            }
-          }
-        }));
-      } else {
-        setFormData(prev => ({
-          ...prev,
-          [parent]: {
-            ...prev[parent],
-            [child]: value
-          }
-        }));
-      }
-    } else {
-      setFormData(prev => ({ ...prev, [field]: value }));
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <h3 className="text-xl font-bold mb-6">
-          {shop ? 'Edit Shop' : 'Create New Shop'}
-        </h3>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Shop Name</label>
-              <input
-                type="text"
-                value={formData.shopName}
-                onChange={(e) => handleChange('shopName', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-                required
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Status</label>
-              <select
-                value={formData.status}
-                onChange={(e) => handleChange('status', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Address</label>
-              <input
-                type="text"
-                value={formData.address}
-                onChange={(e) => handleChange('address', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Phone</label>
-              <input
-                type="text"
-                value={formData.phone}
-                onChange={(e) => handleChange('phone', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => handleChange('email', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Currency</label>
-              <input
-                type="text"
-                value={formData.settings.currency}
-                onChange={(e) => handleChange('settings.currency', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Timezone</label>
-              <input
-                type="text"
-                value={formData.settings.timezone}
-                onChange={(e) => handleChange('settings.timezone', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Opening Time</label>
-              <input
-                type="time"
-                value={formData.settings.businessHours.open}
-                onChange={(e) => handleChange('settings.businessHours.open', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Closing Time</label>
-              <input
-                type="time"
-                value={formData.settings.businessHours.close}
-                onChange={(e) => handleChange('settings.businessHours.close', e.target.value)}
-                className="w-full border rounded-lg px-3 py-2"
-              />
-            </div>
-          </div>
-          
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              {shop ? 'Update Shop' : 'Create Shop'}
-            </button>
-          </div>
-        </form>
-      </div>
     </div>
   );
 };

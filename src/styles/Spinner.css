@@ -1,28 +1,29 @@
-/* Spinner.css */
+/* src/styles/Spinner.css */
 .spinner-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 3rem 0;
+  min-height: 200px;
+  padding: 2rem;
 }
 
 .spinner {
+  border: 4px solid #f3f4f6;
+  border-top: 4px solid #3b82f6;
+  border-radius: 50%;
   width: 40px;
   height: 40px;
-  border: 4px solid #e5e7eb; /* Light gray */
-  border-top: 4px solid #2563eb; /* Blue (change for your theme) */
-  border-radius: 50%;
-  animation: spinner-rotate 0.9s linear infinite;
-  margin-right: 1rem;
-}
-
-@keyframes spinner-rotate {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  animation: spin 1s linear infinite;
 }
 
 .spinner-text {
-  font-weight: 600;
-  color: #2563eb;
-  font-size: 1.1rem;
+  margin-top: 1rem;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
