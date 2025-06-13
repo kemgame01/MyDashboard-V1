@@ -1,6 +1,5 @@
 // src/features/layout/Sidebar.jsx
 import React, { useState } from "react";
-// --- FIX: Corrected the import statement to be valid JavaScript ---
 import {
   Menu, X,
   Home, UserCircle, Shield, ClipboardList,
@@ -31,6 +30,7 @@ const Sidebar = ({
 
   const userRole = (user.role || "").toLowerCase();
   const isRootAdmin = user.isRootAdmin === true;
+  const isShopOwner = user.assignedShops?.some(shop => shop.isOwner) || false;
 
   const navLinks = [
     { label: "Dashboard", icon: <Home size={18} />, onClick: () => showSection("customers", user), show: true, activeKey: "customers" },
@@ -42,29 +42,31 @@ const Sidebar = ({
         { label: "Pending Orders", icon: <Ticket size={16} />, onClick: () => showSection("pendingOrders", user), activeKey: "pendingOrders" }
       ]
     },
-    { label: "Role Management", icon: <Shield size={18} />, onClick: () => showSection("roleManagement", user), show: userRole === "admin" || isRootAdmin, activeKey: "roleManagement" },
+    { label: "Role Management", icon: <Shield size={18} />, onClick: () => showSection("roleManagement", user), show: isRootAdmin || isShopOwner, activeKey: "roleManagement" },
     { label: "Task Management", icon: <ClipboardList size={18} />, onClick: () => showSection("taskManagement", user), show: userRole === "admin" || userRole === "manager" || isRootAdmin, activeKey: "taskManagement" },
     { label: "Inventory", icon: <Boxes size={18} />, onClick: () => showSection("inventory", user), show: userRole === "admin" || userRole === "manager" || isRootAdmin, activeKey: "inventory" },
     { label: "Sales", icon: <DollarSign size={18} />, onClick: () => showSection("sales", user), show: userRole === "sales" || userRole === "manager" || userRole === "admin" || isRootAdmin, activeKey: "sales" },
     {
       label: "Manage",
       icon: <Settings size={18} />,
-      show: isRootAdmin,
+      show: isRootAdmin || isShopOwner,
       activeKey: "manage",
       children: [
         { 
           label: "Brands/Categories", 
           icon: <Layers size={16} />, 
           onClick: () => showSection("brandCategory", user), 
-          activeKey: "brandCategory" 
+          activeKey: "brandCategory",
+          show: isRootAdmin
         },
         { 
           label: "Shop Manager", 
           icon: <Building size={16} />,
           onClick: () => showSection("shopManagement", user), 
-          activeKey: "shopManagement" 
+          activeKey: "shopManagement",
+          show: isRootAdmin || isShopOwner
         }
-      ]
+      ].filter(child => child.show !== false)
     },
     { label: "Docs", icon: <Book size={18} />, url: "https://tailwindcss.com/docs/", external: true, show: true },
   ];

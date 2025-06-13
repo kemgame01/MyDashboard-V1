@@ -10,17 +10,17 @@ export default function Layout({
   children,
 }) {
   return (
-    // The outermost background can be a slightly different shade or the same
-    <div className="App flex min-h-screen bg-white">
+    <div className="flex min-h-screen bg-gray-100 text-gray-900">
       <Sidebar
         user={user}
         activeSection={activeSection}
         handleLogout={handleLogout}
         showSection={showSection}
       />
-      {/* --- MODIFIED: Added bg-gray-50 for a consistent content background --- */}
-      <main className="main-content flex-1 min-w-0 py-8 px-2 sm:px-8 bg-gray-50">
-        {children}
+      <main className="flex-1 w-full overflow-x-hidden py-8 px-4 sm:px-8 bg-gray-50">
+        <div className="max-w-7xl mx-auto">
+          {children}
+        </div>
       </main>
     </div>
   );

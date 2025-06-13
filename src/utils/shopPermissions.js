@@ -1,43 +1,52 @@
 // src/utils/shopPermissions.js
 import { where, query as firestoreQuery } from 'firebase/firestore';
 
-// Define shop permissions since the shopModel doesn't exist yet
+// Default permissions for different roles
 export const SHOP_PERMISSIONS = {
   owner: {
-    inventory: { read: true, write: true, delete: true },
-    sales: { read: true, write: true, delete: true },
-    staff: { read: true, write: true, delete: true },
-    settings: { read: true, write: true, delete: true }
+    canManageShop: true,
+    canManageStaff: true,
+    canManageInventory: true,
+    canViewSales: true,
+    canManageSales: true,
+    canViewReports: true,
+    canDeleteShop: true
   },
   admin: {
-    inventory: { read: true, write: true, delete: true },
-    sales: { read: true, write: true, delete: true },
-    staff: { read: true, write: true, delete: true },
-    settings: { read: true, write: true, delete: true }
+    canManageShop: true,
+    canManageStaff: true,
+    canManageInventory: true,
+    canViewSales: true,
+    canManageSales: true,
+    canViewReports: true,
+    canDeleteShop: false
   },
   manager: {
-    inventory: { read: true, write: true, delete: false },
-    sales: { read: true, write: true, delete: false },
-    staff: { read: true, write: true, delete: false },
-    settings: { read: true, write: false, delete: false }
-  },
-    sales: {
-    inventory: { read: true, write: false, delete: false }, // Can see inventory to check stock
-    sales: { read: true, write: true, delete: false },     // Can create and view sales
-    staff: { read: false, write: false, delete: false },    // Cannot manage staff
-    settings: { read: false, write: false, delete: false } // Cannot change shop settings
+    canManageShop: false,
+    canManageStaff: false,
+    canManageInventory: true,
+    canViewSales: true,
+    canManageSales: true,
+    canViewReports: true,
+    canDeleteShop: false
   },
   staff: {
-    inventory: { read: true, write: true, delete: false },
-    sales: { read: true, write: true, delete: false },
-    staff: { read: false, write: false, delete: false },
-    settings: { read: false, write: false, delete: false }
+    canManageShop: false,
+    canManageStaff: false,
+    canManageInventory: false,
+    canViewSales: true,
+    canManageSales: false,
+    canViewReports: false,
+    canDeleteShop: false
   },
   viewer: {
-    inventory: { read: true, write: false, delete: false },
-    sales: { read: true, write: false, delete: false },
-    staff: { read: false, write: false, delete: false },
-    settings: { read: false, write: false, delete: false }
+    canManageShop: false,
+    canManageStaff: false,
+    canManageInventory: false,
+    canViewSales: false,
+    canManageSales: false,
+    canViewReports: false,
+    canDeleteShop: false
   }
 };
 
@@ -206,6 +215,7 @@ export function addShopFilter(baseQuery, user, shopIdField = 'shopId') {
     where(shopIdField, 'in', userShopIds.slice(0, 10))
   );
 }
+
 /**
  * Validate shop assignment
  */
@@ -240,3 +250,21 @@ export function createShopAssignment(shopId, shopName, role, isOwner = false, as
   validateShopAssignment(assignment);
   return assignment;
 }
+
+// HELPER FUNCTION for primary role change permissions
+export const canChangeGlobalRole = (editor, targetUser) => {
+  if (!editor || !targetUser) return false;
+  // Only Root Admin can change global user roles
+  return editor.isRootAdmin === true;
+};
+
+export const canChangeShopRole = (editor, targetUser, shopId) => {
+  if (!editor || !targetUser) return false;
+  // Root Admin can change any shop role
+  if (editor.isRootAdmin) return true;
+  // Shop owner can change roles for users in their shop
+  const isOwnerOfShop = editor.assignedShops?.some(shop => 
+    shop.shopId === shopId && shop.isOwner
+  );
+  return isOwnerOfShop;
+};
