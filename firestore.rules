@@ -1,112 +1,68 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // --- HELPER FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     function isRootAdmin() {
-      return request.auth != null &&
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isRootAdmin == true;
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isRootAdmin == true;
     }
+
+    function isShopOwner(shopId) {
+  return isRootAdmin() ||
+    (
+      isSignedIn() &&
+      exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedShopIds.hasAny([shopId])
+    );
+}
     
-    function getUserRole() {
-      return request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
-        : '';
-    }
-    function hasRole(role) {
-      return getUserRole() == role;
-    }
-    
-    function canManageSales() {
-      let role = getUserRole();
-      return isRootAdmin() || 
-             role == 'admin' || 
-             role == 'manager' || 
-             role == 'sales';
-    }
-    function canManageInventory() {
-      let role = getUserRole();
-      return isRootAdmin() || 
-             role == 'admin' || 
-             role == 'manager';
-    }
-    
-    // --- COLLECTION RULES ---
+    function hasShopAccess(shopId) {
+  return isShopOwner(shopId);
+}
+
     match /users/{userId} {
-      allow read, update: if request.auth.uid == userId || hasRole('admin') || isRootAdmin();
-      allow create: if isRootAdmin() || hasRole('admin');
-      
-      // INVENTORY & TASKS (Subcollections of Users)
-      match /inventory/{itemId} {
-        allow read, write: if request.auth.uid == userId || canManageInventory();
-      }
-      match /inventoryHistory/{logId} {
-        allow read, create: if request.auth.uid == userId || canManageInventory();
-      }
-      // Remove old sales rule as sales are now at root level
-      match /tasks/{taskId} {
-        allow read, write: if request.auth.uid == userId || isRootAdmin();
-      }
+      // Always allow users to read their own profile so isRootAdmin() can be checked
+      allow read: if request.auth.uid == userId || isRootAdmin();
+
+      allow write: if isRootAdmin() ||
+                      (userId == request.auth.uid && 
+                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRootAdmin', 'role', 'assignedShops']));
     }
-    
-    // --- ROOT LEVEL SALES COLLECTION ---
-    match /sales/{saleId} {
-      // Allow read if:
-      // 1. User is admin/root admin (can see all sales)
-      // 2. User has sales/manager role
-      // 3. User is the owner of the sale (userId field matches)
-      allow read: if canManageSales() || 
-                     (request.auth != null && resource.data.userId == request.auth.uid);
-      
-      // Allow create if authenticated and has permission to manage sales
-      allow create: if request.auth != null && 
-                       (canManageSales() || hasRole('staff'));
-      
-      // Allow update/delete if:
-      // 1. User is admin/root admin
-      // 2. User has manager role
-      // 3. User owns the sale
-      allow update, delete: if isRootAdmin() || 
-                              hasRole('admin') || 
-                              hasRole('manager') ||
-                              (request.auth != null && resource.data.userId == request.auth.uid);
-    }
-    
-    // --- CUSTOMERS: THIS IS THE FIX ---
-    // This simplified rule securely covers all cases for reading, writing, and listing.
-    match /users/{userId}/customers/{customerId} {
-      allow read, write, list: if request.auth.uid == userId || hasRole('admin') || isRootAdmin();
-    }
-    
-    // Collection group query for customers (admin dashboard)
-    match /{path=**}/customers/{customerId} {
-      allow read: if hasRole('admin') || isRootAdmin();
-    }
-    
-    // GLOBAL COLLECTIONS
+
     match /shops/{shopId} {
-      allow read: if request.auth != null;
-      allow write: if isRootAdmin() || hasRole('admin');
+      allow read: if isRootAdmin() || hasShopAccess(shopId);
+
+      allow write: if isRootAdmin() || isShopOwner(shopId);
     }
-    match /brands/{brandId} {
-      allow read: if request.auth != null;
-      allow write: if isRootAdmin() || hasRole('admin');
+
+    match /shopInvitations/{invitationId} {
+      allow read: if isRootAdmin() ||
+                     isShopOwner(resource.data.shopId) ||
+                     (isSignedIn() && resource.data.email == request.auth.token.email);
+
+      allow create: if isRootAdmin() || isShopOwner(request.resource.data.shopId);
+      allow update: if isRootAdmin() || 
+                       isShopOwner(resource.data.shopId) ||
+                       (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow delete: if isRootAdmin() || isShopOwner(resource.data.shopId);
     }
-    match /categories/{categoryId} {
-      allow read: if request.auth != null;
-      allow write: if isRootAdmin() || hasRole('admin');
-    }
-    match /trackingCompanies/{companyId} {
-      allow read: if request.auth != null;
-      allow write: if isRootAdmin() || hasRole('admin');
-    }
-    
-    // AUDIT LOGS & INVITES
+
     match /auditLogs/{logId} {
-      allow read, write: if hasRole('admin') || isRootAdmin();
+      allow read: if isRootAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
     }
-    match /invites/{inviteId} {
-      allow read, write: if hasRole('admin') || isRootAdmin();
+
+    match /users/{userId}/customers/{customerId} {
+      allow read, write: if isRootAdmin() || userId == request.auth.uid;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
