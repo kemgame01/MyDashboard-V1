@@ -1,3 +1,4 @@
+// src/App.js
 import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Login from './pages/Login';
@@ -9,6 +10,7 @@ import AuditLogPage from './pages/AuditLogPage';
 import NotFound from './pages/NotFound';
 import RoleManagementSection from './features/users/RoleManagementSection';
 import CategoryBrandManager from './components/CategoryBrandManager';
+import AdminMigration from './pages/AdminMigration'; // Add this import
 import { useMergedUser } from './hooks/useMergedUser';
 import Spinner from './components/Spinner';
 
@@ -50,6 +52,16 @@ const App = () => {
           element={
             <PrivateRoute role="admin">
               <CategoryBrandManager user={user} />
+            </PrivateRoute>
+          }
+        />
+        
+        {/* Add Migration Route - Root Admin Only */}
+        <Route
+          path="/admin/migration"
+          element={
+            <PrivateRoute>
+              <AdminMigration user={user} />
             </PrivateRoute>
           }
         />

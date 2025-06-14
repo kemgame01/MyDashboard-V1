@@ -2,7 +2,7 @@
 // Helper functions to migrate to denormalized structure and maintain sync
 
 import { db } from '../firebase';
-import { doc, setDoc, deleteDoc, writeBatch, collection, getDocs } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch, collection, getDocs, getDoc, updateDoc } from 'firebase/firestore';
 
 /**
  * Migrate existing user data to denormalized structure
@@ -10,10 +10,12 @@ import { doc, setDoc, deleteDoc, writeBatch, collection, getDocs } from 'firebas
  */
 export async function migrateUsersToDenormalizedStructure() {
   const batch = writeBatch(db);
+  let processedCount = 0;
   
   try {
     // Get all users
     const usersSnapshot = await getDocs(collection(db, 'users'));
+    console.log(`Found ${usersSnapshot.size} users to migrate`);
     
     for (const userDoc of usersSnapshot.docs) {
       const userData = userDoc.data();
@@ -48,10 +50,25 @@ export async function migrateUsersToDenormalizedStructure() {
           });
         }
       }
+      
+      processedCount++;
+      
+      // Commit in batches of 400 to avoid hitting Firestore limits
+      if (processedCount % 400 === 0) {
+        await batch.commit();
+        console.log(`Processed ${processedCount} users...`);
+        // Start a new batch
+        batch = writeBatch(db);
+      }
     }
     
-    await batch.commit();
-    console.log('Migration completed successfully');
+    // Commit any remaining operations
+    if (processedCount % 400 !== 0) {
+      await batch.commit();
+    }
+    
+    console.log(`Migration completed successfully. Processed ${processedCount} users.`);
+    return { success: true, processedCount };
   } catch (error) {
     console.error('Migration failed:', error);
     throw error;
