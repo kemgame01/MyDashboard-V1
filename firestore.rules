@@ -1,68 +1,218 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
+
+    // --- HELPER FUNCTIONS ---
+    function isAuthenticated() {
       return request.auth != null;
     }
-
-    function isRootAdmin() {
-      return isSignedIn() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isRootAdmin == true;
-    }
-
-    function isShopOwner(shopId) {
-      return isRootAdmin() ||
-        (
-          isSignedIn() &&
-          exists(/databases/$(database)/documents/shops/$(shopId)) &&
-          get(/databases/$(database)/documents/shops/$(shopId)).data.shopOwner == request.auth.uid
-        );
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
-    function hasShopAccess(shopId) {
-  return isShopOwner(shopId);
-}
-
+    function isRootAdmin() {
+      return isAuthenticated() && getUserData().isRootAdmin == true;
+    }
+    
+    function hasGlobalRole(role) {
+      return isAuthenticated() && getUserData().globalRole == role;
+    }
+    
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+    
+    function isAdmin() {
+      return hasGlobalRole('admin') || hasRole('admin');
+    }
+    
+    function isManager() {
+      return hasGlobalRole('manager') || hasRole('manager');
+    }
+    
+    function isStaff() {
+      return hasGlobalRole('staff') || hasRole('staff');
+    }
+    
+    function isSales() {
+      return hasGlobalRole('sales') || hasRole('sales');
+    }
+    
+    function isViewer() {
+      return hasGlobalRole('viewer') || hasRole('viewer');
+    }
+    
+    // --- USERS COLLECTION ---
     match /users/{userId} {
-      // Always allow users to read their own profile so isRootAdmin() can be checked
-      allow read: if request.auth.uid == userId || isRootAdmin();
-
-      allow write: if isRootAdmin() ||
-                      (userId == request.auth.uid && 
-                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isRootAdmin', 'role', 'assignedShops']));
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin()
+      );
+      
+      allow create: if isRootAdmin();
+      
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin()
+      );
+      
+      allow delete: if isRootAdmin();
     }
-
-    match /shops/{shopId} {
-      allow read: if isRootAdmin() || hasShopAccess(shopId);
-
-      allow write: if isRootAdmin() || isShopOwner(shopId);
+    
+    // --- CUSTOMER RULES (USER-BASED) ---
+    
+    // Allow collectionGroup queries for admins
+    match /{path=**}/customers/{customerId} {
+      allow list: if isRootAdmin() || isAdmin();
     }
-
-    match /shopInvitations/{invitationId} {
-      allow read: if isRootAdmin() ||
-                     isShopOwner(resource.data.shopId) ||
-                     (isSignedIn() && resource.data.email == request.auth.token.email);
-
-      allow create: if isRootAdmin() || isShopOwner(request.resource.data.shopId);
-      allow update: if isRootAdmin() || 
-                       isShopOwner(resource.data.shopId) ||
-                       (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow delete: if isRootAdmin() || isShopOwner(resource.data.shopId);
-    }
-
-    match /auditLogs/{logId} {
-      allow read: if isRootAdmin();
-      allow create: if isSignedIn();
-      allow update, delete: if false;
-    }
-
+    
+    // User's own customers (nested structure)
     match /users/{userId}/customers/{customerId} {
-      allow read, write: if isRootAdmin() || userId == request.auth.uid;
+      // User can manage their own customers
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Admins can access all customers
+      allow read, write: if isRootAdmin() || isAdmin();
+      
+      // Manager can read all customers
+      allow read: if isManager();
+      
+      // Sales can read and create customers
+      allow read, create, update: if isSales();
+      
+      // Staff can read customers
+      allow read: if isStaff();
+      
+      // Viewer can only read
+      allow read: if isViewer();
     }
-
-    match /{document=**} {
-      allow read, write: if false;
+    
+    // --- SHOPS COLLECTION ---
+    match /shops/{shopId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isRootAdmin() || isAdmin());
+      allow update: if isAuthenticated() && (
+        isRootAdmin() || 
+        isAdmin() ||
+        (resource.data.ownerId == request.auth.uid)
+      );
+      allow delete: if isRootAdmin();
+    }
+    
+    // --- SHOP INVITATIONS ---
+    match /shopInvitations/{invitationId} {
+      allow read: if isAuthenticated() && (
+        isRootAdmin() || 
+        isAdmin() ||
+        resource.data.email == request.auth.token.email ||
+        resource.data.invitedBy == request.auth.uid
+      );
+      
+      allow create: if isAuthenticated() && (
+        isRootAdmin() || 
+        isAdmin()
+      );
+      
+      allow update: if isAuthenticated() && (
+        isRootAdmin() ||
+        resource.data.email == request.auth.token.email ||
+        resource.data.invitedBy == request.auth.uid
+      );
+      
+      allow delete: if isAuthenticated() && (
+        isRootAdmin() ||
+        resource.data.invitedBy == request.auth.uid
+      );
+    }
+    
+    // --- INVENTORY ---
+    match /users/{userId}/inventory/{itemId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin() || 
+        isManager()
+      );
+      
+      allow write: if isAuthenticated() && (
+        (request.auth.uid == userId && (isAdmin() || isManager())) ||
+        isRootAdmin()
+      );
+    }
+    
+    // --- SALES ---
+    match /users/{userId}/sales/{saleId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin() || 
+        isManager() ||
+        isSales()
+      );
+      
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin() || 
+        isManager() ||
+        isSales()
+      );
+      
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin()
+      );
+      
+      allow delete: if isRootAdmin() || isAdmin();
+    }
+    
+    // --- TASKS ---
+    match /users/{userId}/tasks/{taskId} {
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin() ||
+        isManager()
+      );
+    }
+    
+    // --- ROLE MANAGEMENT (AUDIT LOGS) ---
+    match /auditLogs/{logId} {
+      allow read: if isRootAdmin() || isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Audit logs are immutable
+    }
+    
+    // --- INVENTORY HISTORY ---
+    match /users/{userId}/inventoryHistory/{logId} {
+      allow read, create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isRootAdmin() || 
+        isAdmin() || 
+        isManager()
+      );
+      allow update, delete: if false; // History is immutable
+    }
+    
+    // --- GLOBAL COLLECTIONS ---
+    match /brands/{brandId} {
+      allow read: if isAuthenticated();
+      allow write: if isRootAdmin() || isAdmin();
+    }
+    
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow write: if isRootAdmin() || isAdmin();
+    }
+    
+    match /trackingCompanies/{companyId} {
+      allow read: if isAuthenticated();
+      allow write: if isRootAdmin() || isAdmin();
     }
   }
 }

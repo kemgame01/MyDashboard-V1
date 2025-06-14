@@ -187,10 +187,17 @@ Do you want to proceed?`;
     }
   };
 
+  // In Dashboard.js, update the renderContent function:
+
   const renderContent = () => {
     switch (activeSection) {
       case 'customers':
-        return <CustomerSection />;
+        // FIXED: Pass required props to CustomerSection
+        return <CustomerSection 
+          userId={user?.uid} 
+          user={user} 
+          shopContext={shopContext} 
+        />;
       case 'userProfile':
         return <UserProfile targetUserId={user.uid} />;
       case 'roleManagement':

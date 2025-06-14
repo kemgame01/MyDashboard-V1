@@ -1,22 +1,23 @@
 // src/features/customers/CustomerSection.jsx
+// Fixed version that keeps your existing modal logic
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  collection, query, orderBy, limit, startAfter, endBefore, limitToLast,
-  getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
-  collectionGroup, where, and
+  collection, query, orderBy, limit, getDocs, addDoc, 
+  updateDoc, deleteDoc, doc, serverTimestamp, collectionGroup
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import CustomerList from './CustomerList';
+import CustomerEditModal from './CustomerEditModal'; // Your existing modal
 import CustomerForm from './CustomerForm';
 import CustomerFilters from './CustomerFilters';
 import TagChangeConfirmModal from './TagChangeConfirmModal';
 import { exportCSV } from '../../utils/exportCSV';
-import CustomerControlsDisclosure from "./CustomerControlsDisclosure";
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Store, AlertCircle } from 'lucide-react';
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 20; // Match your CustomerList itemsPerPage
 
-const CustomerSection = ({ userId, user, shopContext }) => { 
+const CustomerSection = ({ userId, user, shopContext }) => {
   const [customers, setCustomers] = useState([]);
   const [allCustomers, setAllCustomers] = useState([]);
   const [trackingCompanies, setTrackingCompanies] = useState([]);
@@ -27,10 +28,13 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tagChangeInfo, setTagChangeInfo] = useState(null);
-  const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   
-  // Advanced filters state
+  // Modal state for editing
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  
+  // Filters state
   const [filters, setFilters] = useState({
     tag: 'all',
     dateFrom: null,
@@ -42,11 +46,16 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   
   const [activeFilters, setActiveFilters] = useState({});
   
+  // Permission checks
   const isRootAdmin = user?.isRootAdmin === true;
-  const isShopOwner = user?.assignedShops?.some(shop => shop.isOwner) || false;
-  const currentShopId = shopContext?.shopId;
-
-  // Get unique tags from customers
+  const isAdmin = user?.role === 'admin' || user?.globalRole === 'admin' || isRootAdmin;
+  const isManager = user?.role === 'manager' || user?.globalRole === 'manager';
+  const isSales = user?.role === 'sales' || user?.globalRole === 'sales';
+  
+  const canEdit = isRootAdmin || isAdmin || isManager || isSales;
+  const canDelete = isRootAdmin || isAdmin;
+  
+  // Get unique tags
   const availableTags = useMemo(() => {
     const tags = new Set(['New', 'Active', 'Inactive', 'VIP']);
     allCustomers.forEach(customer => {
@@ -60,10 +69,10 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const mapCustomerData = (doc) => ({
     id: doc.id,
     ...doc.data(),
-    shopId: doc.ref.parent.parent.id, // Shop ID from the path
+    ownerId: doc.ref.parent.parent?.id || userId,
   });
   
-  // Client-side filtering function
+  // Apply filters
   const applyClientSideFilters = useCallback((customers) => {
     return customers.filter(customer => {
       // Tag filter
@@ -78,6 +87,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         const customerDate = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
         if (customerDate < new Date(activeFilters.dateFrom)) return false;
       }
+      
       if (activeFilters.dateTo) {
         const customerDate = customer.createdAt?.toDate ? customer.createdAt.toDate() : new Date(customer.createdAt);
         const endDate = new Date(activeFilters.dateTo);
@@ -93,7 +103,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
       if (activeFilters.hasAddress === 'yes' && !customer.address) return false;
       if (activeFilters.hasAddress === 'no' && customer.address) return false;
       
-      // Text search
+      // Text search in filters
       if (activeFilters.searchText) {
         const searchLower = activeFilters.searchText.toLowerCase();
         const searchableFields = [
@@ -129,482 +139,279 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     });
   }, [activeFilters, searchTerm]);
 
-  // Load all customers initially
+  // Load all customers
   const loadAllCustomers = useCallback(async () => {
+    if (!userId && !isAdmin) {
+      setFormError("No user context available");
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
     setFormError('');
     
     try {
       let allData = [];
-
-      if (isRootAdmin) {
-        // Root admin can see all customers from all shops
-        const shopsSnapshot = await getDocs(collection(db, 'shops'));
-        
-        for (const shopDoc of shopsSnapshot.docs) {
-          const customersRef = collection(db, 'shops', shopDoc.id, 'customers');
-          const customersSnapshot = await getDocs(query(customersRef, orderBy('createdAt', 'desc')));
-          const shopCustomers = customersSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            shopId: shopDoc.id,
-            shopName: shopDoc.data().shopName
-          }));
-          allData = [...allData, ...shopCustomers];
-        }
-      } else if (currentShopId) {
-        // Regular users see customers from their current shop
-        const customersRef = collection(db, 'shops', currentShopId, 'customers');
-        const q = query(customersRef, orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
+      
+      if (isAdmin) {
+        // Admin sees all customers from all users
+        const snapshot = await getDocs(
+          query(collectionGroup(db, 'customers'), orderBy('createdAt', 'desc'))
+        );
         allData = snapshot.docs.map(mapCustomerData);
-      } else if (user?.assignedShops?.length > 0) {
-        // If no shop selected but user has shops, load from all assigned shops
-        for (const shop of user.assignedShops) {
-          const customersRef = collection(db, 'shops', shop.shopId, 'customers');
-          const q = query(customersRef, orderBy('createdAt', 'desc'));
-          const snapshot = await getDocs(q);
-          const shopCustomers = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            shopId: shop.shopId,
-            shopName: shop.shopName
-          }));
-          allData = [...allData, ...shopCustomers];
-        }
+      } else {
+        // Regular user sees only their customers
+        const snapshot = await getDocs(
+          query(collection(db, 'users', userId, 'customers'), orderBy('createdAt', 'desc'))
+        );
+        allData = snapshot.docs.map(mapCustomerData);
       }
-
+      
       setAllCustomers(allData);
-      updateDisplayedCustomers(allData);
+      
+      // Apply filters and set displayed customers
+      const filtered = applyClientSideFilters(allData);
+      setCustomers(filtered);
+      
     } catch (err) {
       console.error("Error fetching customers: ", err);
       setFormError("Failed to load customers. Please check your permissions.");
     } finally {
       setLoading(false);
     }
-  }, [currentShopId, isRootAdmin, user]);
+  }, [userId, isAdmin, applyClientSideFilters]);
 
-  // Update displayed customers based on filters and pagination
-  const updateDisplayedCustomers = useCallback((customersData) => {
-    const filtered = applyClientSideFilters(customersData || allCustomers);
-    
-    // Calculate pagination
-    const startIndex = (page - 1) * PAGE_SIZE;
-    const endIndex = startIndex + PAGE_SIZE;
-    const paged = filtered.slice(startIndex, endIndex);
-    
-    setCustomers(paged);
-  }, [allCustomers, applyClientSideFilters, page]);
-
-  // Load initial data
+  // Load data on mount
   useEffect(() => {
     loadAllCustomers();
-    
-    const fetchTrackingCompanies = async () => {
-      try {
-        const companiesSnapshot = await getDocs(collection(db, 'trackingCompanies'));
-        setTrackingCompanies(companiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        console.error('Error fetching tracking companies:', err);
-      }
-    };
     fetchTrackingCompanies();
   }, [loadAllCustomers]);
 
-  // Update displayed customers when filters, search, or page changes
+  // Update displayed customers when filters change
   useEffect(() => {
-    updateDisplayedCustomers();
-  }, [updateDisplayedCustomers, searchTerm, page]);
+    const filtered = applyClientSideFilters(allCustomers);
+    setCustomers(filtered);
+  }, [allCustomers, activeFilters, searchTerm, applyClientSideFilters]);
 
-  // Reload when shop context changes
-  useEffect(() => {
-    if (shopContext) {
-      setPage(1); // Reset to first page
-      loadAllCustomers();
+  // Fetch tracking companies
+  const fetchTrackingCompanies = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'trackingCompanies'));
+      const companies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTrackingCompanies(companies);
+    } catch (err) {
+      console.error("Error fetching tracking companies: ", err);
     }
-  }, [shopContext?.shopId]); // Only reload when shopId changes
-
-  // Apply filters - ALWAYS reset to page 1
-  const handleApplyFilters = () => {
-    setActiveFilters({ ...filters });
-    setPage(1);
-    updateDisplayedCustomers();
   };
-  
-  // Reset filters
+
+  // Handle edit click - open modal
+  const handleEditClick = (customer) => {
+    setEditingCustomer(customer);
+    setEditModalOpen(true);
+  };
+
+  // Handle save from modal
+  const handleSaveClick = async (updatedCustomer) => {
+    if (!canEdit) {
+      alert("You don't have permission to edit customers");
+      return;
+    }
+    
+    try {
+      const { id, ownerId, ...dataToSave } = updatedCustomer;
+      const owner = isAdmin && ownerId ? ownerId : userId;
+      const docRef = doc(db, 'users', owner, 'customers', id);
+      
+      await updateDoc(docRef, {
+        ...dataToSave,
+        updatedAt: serverTimestamp()
+      });
+      
+      await loadAllCustomers();
+      setEditModalOpen(false);
+      setEditingCustomer(null);
+    } catch (err) {
+      console.error('Error updating customer:', err);
+      alert('Failed to update customer: ' + err.message);
+    }
+  };
+
+  // Handle delete
+  const handleDeleteClick = async (ids) => {
+    if (!canDelete) {
+      alert("You don't have permission to delete customers");
+      return;
+    }
+    
+    const idsArray = Array.isArray(ids) ? ids : [ids];
+    if (!window.confirm(`Delete ${idsArray.length} customer(s)?`)) return;
+    
+    try {
+      for (const id of idsArray) {
+        const customer = allCustomers.find(c => c.id === id);
+        if (customer) {
+          const owner = isAdmin && customer.ownerId ? customer.ownerId : userId;
+          const docRef = doc(db, 'users', owner, 'customers', id);
+          await deleteDoc(docRef);
+        }
+      }
+      setSelectedIds([]);
+      await loadAllCustomers();
+    } catch (err) {
+      console.error('Error deleting customers:', err);
+      alert('Failed to delete customers');
+    }
+  };
+
+  // Handle quick add
+  const handleAddQuick = async (customerData) => {
+    try {
+      const data = {
+        ...customerData,
+        createdAt: serverTimestamp(),
+        tags: ['New']
+      };
+      
+      await addDoc(collection(db, 'users', userId, 'customers'), data);
+      await loadAllCustomers();
+    } catch (err) {
+      console.error('Error adding customer:', err);
+      setFormError('Error adding customer: ' + err.message);
+    }
+  };
+
+  // Bulk operations
+  const handleBulkExport = () => {
+    const selectedCustomers = allCustomers.filter(c => selectedIds.includes(c.id));
+    exportCSV(selectedCustomers, 'customers_export');
+  };
+
+  const handleBulkDelete = (ids) => {
+    handleDeleteClick(ids);
+  };
+
+  const handleBulkTag = (tag) => {
+    setTagChangeInfo({ ids: selectedIds, newTag: tag });
+  };
+
+  const handleInitiateTagChange = (customerId, newTag) => {
+    setTagChangeInfo({ ids: [customerId], newTag });
+  };
+
+  const handleConfirmTagChange = async () => {
+    if (!tagChangeInfo || !canEdit) return;
+    
+    try {
+      for (const id of tagChangeInfo.ids) {
+        const customer = allCustomers.find(c => c.id === id);
+        if (customer) {
+          const owner = isAdmin && customer.ownerId ? customer.ownerId : userId;
+          const docRef = doc(db, 'users', owner, 'customers', id);
+          const currentTags = customer.tags || [];
+          const updatedTags = currentTags.includes(tagChangeInfo.newTag)
+            ? currentTags
+            : [...currentTags, tagChangeInfo.newTag];
+          
+          await updateDoc(docRef, { tags: updatedTags });
+        }
+      }
+      
+      setTagChangeInfo(null);
+      setSelectedIds([]);
+      await loadAllCustomers();
+    } catch (err) {
+      console.error('Error updating tags:', err);
+      alert('Failed to update tags');
+    }
+  };
+
+  // Filters
+  const handleApplyFilters = () => {
+    setActiveFilters(filters);
+  };
+
   const handleResetFilters = () => {
-    const resetFilters = {
+    setFilters({
       tag: 'all',
       dateFrom: null,
       dateTo: null,
       hasPhone: 'all',
       hasAddress: 'all',
       searchText: ''
-    };
-    setFilters(resetFilters);
-    setActiveFilters({});
-    setPage(1);
-    updateDisplayedCustomers();
-  };
-
-  // Search handler - reset to page 1
-  const handleSearchChange = (value) => {
-    setSearchTerm(value);
-    setPage(1);
-  };
-
-  // Pagination handlers
-  const totalFilteredCustomers = applyClientSideFilters(allCustomers).length;
-  const totalPages = Math.ceil(totalFilteredCustomers / PAGE_SIZE);
-  const isLastPage = page >= totalPages;
-
-  const handleNextPage = () => {
-    if (!isLastPage) {
-      setPage(p => p + 1);
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (page > 1) {
-      setPage(p => p - 1);
-    }
-  };
-
-  const handleInitiateTagChange = (customerId, newTag, currentTag) => {
-    if (newTag === currentTag) return;
-    const customerToUpdate = customers.find(c => c.id === customerId);
-    setTagChangeInfo({ 
-      customerId, 
-      newTag, 
-      shopId: customerToUpdate.shopId,
-      customerName: `${customerToUpdate.firstName} ${customerToUpdate.lastName}`
     });
-  };
-
-  const handleConfirmTagChange = async () => {
-    if (!tagChangeInfo) return;
-    const { customerId, newTag, shopId } = tagChangeInfo;
-    
-    try {
-      const customerDocRef = doc(db, 'shops', shopId, 'customers', customerId);
-      await updateDoc(customerDocRef, { 
-        tags: [newTag],
-        updatedAt: serverTimestamp()
-      });
-      
-      // Update local state
-      setAllCustomers(prev => prev.map(c => 
-        c.id === customerId ? { ...c, tags: [newTag] } : c
-      ));
-      setCustomers(prev => prev.map(c => 
-        c.id === customerId ? { ...c, tags: [newTag] } : c
-      ));
-      
-      setFormError(''); // Clear any previous errors
-    } catch (error) {
-      console.error("Error updating tag:", error);
-      setFormError("Could not update the tag. Please check your permissions.");
-    } finally {
-      setTagChangeInfo(null);
-    }
-  };
-
-  const handleCancelTagChange = () => {
-    setTagChangeInfo(null);
-  };
-  
-  const handleAddCustomerSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!currentShopId) {
-      setFormError('Please select a shop first.');
-      return;
-    }
-    
-    if (!newCustomer.firstName || !newCustomer.email) { 
-      setFormError('Name and email required.'); 
-      return; 
-    }
-    
-    try {
-      const customerData = { 
-        ...newCustomer, 
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        tags: ['New'],
-        addedBy: userId,
-        addedByName: user.displayName || user.email
-      };
-      
-      const customersRef = collection(db, 'shops', currentShopId, 'customers');
-      await addDoc(customersRef, customerData);
-      
-      setIsAdding(false); 
-      setNewCustomer({}); 
-      setFormError('');
-      loadAllCustomers();
-    } catch (e) { 
-      console.error('Error adding customer:', e);
-      setFormError('Error adding customer. Please check your permissions.');
-    }
-  };
-
-  const handleQuickAdd = async (data) => {
-    if (!currentShopId) {
-      setFormError('Please select a shop first.');
-      return;
-    }
-    
-    try {
-      const customerData = { 
-        ...data, 
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        tags: ['New'],
-        addedBy: userId,
-        addedByName: user.displayName || user.email
-      };
-      
-      const customersRef = collection(db, 'shops', currentShopId, 'customers');
-      await addDoc(customersRef, customerData);
-      
-      setFormError('');
-      loadAllCustomers();
-    } catch (e) { 
-      console.error('Error adding customer:', e);
-      setFormError('Error adding customer. Please check your permissions.');
-    }
-  };
-
-  const handleDeleteClick = async (ids) => {
-    const idsToDelete = Array.isArray(ids) ? ids : [ids];
-    if (!window.confirm(`Delete ${idsToDelete.length} customer(s)?`)) return;
-    
-    try {
-      const deletePromises = idsToDelete.map(id => {
-        const customerToDelete = allCustomers.find(c => c.id === id);
-        if (!customerToDelete || !customerToDelete.shopId) {
-          throw new Error(`Cannot find shop for customer ID ${id}`);
-        }
-        return deleteDoc(doc(db, 'shops', customerToDelete.shopId, 'customers', id));
-      });
-      
-      await Promise.all(deletePromises);
-      loadAllCustomers();
-      setSelectedIds([]);
-      setFormError('');
-    } catch (e) {
-      setFormError('Error deleting customer(s). Please check your permissions.');
-      console.error(e);
-    }
-  };
-  
-  const handleSaveClick = async (cust) => {
-    const { id, shopId, shopName, ...dataToSave } = cust;
-    
-    if (!shopId) {
-      setFormError('Cannot update customer: Shop information missing.');
-      return;
-    }
-    
-    try {
-      await updateDoc(doc(db, 'shops', shopId, 'customers', id), { 
-        ...dataToSave, 
-        updatedAt: serverTimestamp() 
-      });
-      
-      // Update local state
-      setAllCustomers(p => p.map(c => c.id === id ? { ...cust, updatedAt: new Date() } : c));
-      setCustomers(p => p.map(c => c.id === id ? { ...cust, updatedAt: new Date() } : c));
-      setFormError('');
-    } catch (error) {
-      setFormError('Error updating customer. Please check your permissions.');
-      console.error('Error updating customer:', error);
-    }
-  };
-
-  const handleBulkExport = () => {
-    if (selectedIds.length === 0) return;
-    const dataToExport = allCustomers.filter(c => selectedIds.includes(c.id));
-    exportCSV(dataToExport, `customers_export_${new Date().toISOString().split('T')[0]}.csv`);
-    setSelectedIds([]);
-  };
-
-  const handleBulkTag = async (newTag) => {
-    if (selectedIds.length === 0) return;
-    
-    try {
-      const updatePromises = selectedIds.map(id => {
-        const customer = allCustomers.find(c => c.id === id);
-        if (!customer || !customer.shopId) return Promise.resolve();
-        
-        return updateDoc(
-          doc(db, 'shops', customer.shopId, 'customers', id), 
-          { 
-            tags: [newTag],
-            updatedAt: serverTimestamp()
-          }
-        );
-      });
-      
-      await Promise.all(updatePromises);
-      loadAllCustomers();
-      setSelectedIds([]);
-      setFormError('');
-    } catch (error) {
-      setFormError('Error updating tags. Please check your permissions.');
-      console.error('Error bulk tagging:', error);
-    }
+    setActiveFilters({});
   };
 
   return (
-    <div className="p-4">
-      {/* Tag Change Confirmation Modal */}
-      {tagChangeInfo && (
-        <TagChangeConfirmModal
-          isOpen={!!tagChangeInfo}
-          onClose={handleCancelTagChange}
-          onConfirm={handleConfirmTagChange}
-          customerName={tagChangeInfo.customerName}
-          newTag={tagChangeInfo.newTag}
-        />
-      )}
-
-      {/* Header */}
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Customer Management</h2>
-        {currentShopId && shopContext && (
-          <div className="text-sm text-gray-600">
-            Managing customers for: <span className="font-semibold">{shopContext.shopName}</span>
+    <div className="flex flex-col gap-4">
+      {/* Shop Context Info */}
+      {!isAdmin && shopContext && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            <Store className="w-4 h-4 text-blue-600" />
+            <p className="text-sm text-blue-900">
+              Managing customers for: <strong>{shopContext.shopName}</strong>
+            </p>
           </div>
-        )}
-        {!currentShopId && !isRootAdmin && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
-            Please select a shop to manage customers.
-          </div>
-        )}
-      </div>
-
-      {/* Form Error */}
-      {formError && (
-        <div className="mb-4 p-3 bg-red-100 border border-red-200 rounded-lg text-red-700">
-          {formError}
         </div>
       )}
 
-      {/* Controls */}
-      <div className="mb-4">
-        <CustomerControlsDisclosure
-          searchTerm={searchTerm}
-          onSearchChange={handleSearchChange}
-          selectedIds={selectedIds}
-          onBulkDelete={() => handleDeleteClick(selectedIds)}
-          onBulkExport={handleBulkExport}
-          onBulkTag={handleBulkTag}
-          tags={availableTags}
-        >
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-4">
-            <div className="text-sm text-gray-600">
-              Total customers: {allCustomers.length}
-              {Object.keys(activeFilters).length > 0 && ' (filtered)'}
-            </div>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setShowFilters(!showFilters)} 
-                type="button" 
-                className="bg-gray-200 text-gray-700 font-semibold py-2 px-5 rounded-lg hover:bg-gray-300 transition shadow-sm"
-              >
-                {showFilters ? 'Hide Filters' : 'Show Filters'}
-              </button>
-              <button 
-                onClick={() => setIsAdding(!isAdding)} 
-                type="button" 
-                className="bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg hover:bg-blue-700 transition shadow-sm"
-                disabled={!currentShopId && !isRootAdmin}
-              >
-                {isAdding ? 'Close Form' : 'Add New Customer'}
-              </button>
-            </div>
-          </div>
-          
-          {showFilters && (
-            <CustomerFilters
-              filters={filters}
-              setFilters={setFilters}
-              tags={availableTags}
-              onApplyFilters={handleApplyFilters}
-              onResetFilters={handleResetFilters}
-            />
-          )}
-        </CustomerControlsDisclosure>
-      </div>
+      {/* Error Display */}
+      {formError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-red-800">{formError}</p>
+        </div>
+      )}
 
-      {/* Add Customer Form */}
-      {isAdding && (
-        <CustomerForm 
-          newCustomer={newCustomer} 
-          trackingCompanies={trackingCompanies} 
-          handleNewCustomerChange={e => setNewCustomer(prev => ({ 
-            ...prev, 
-            [e.target.name]: e.target.value 
-          }))} 
-          handleAddCustomerSubmit={handleAddCustomerSubmit} 
-          formError={formError}
+      {/* Customer List with built-in controls */}
+      {loading ? (
+        <div className="text-center py-10">Loading customers...</div>
+      ) : (
+        <CustomerList
+          customers={customers}
+          trackingCompanies={trackingCompanies}
+          handleSaveClick={handleEditClick} // This will open the modal
+          handleDeleteClick={handleDeleteClick}
+          handleAddQuick={handleAddQuick}
+          handleBulkDelete={handleBulkDelete}
+          handleBulkExport={handleBulkExport}
+          handleBulkTag={handleBulkTag}
+          handleInitiateTagChange={handleInitiateTagChange}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          showFilters={showFilters}
+          setShowFilters={setShowFilters}
+          filters={filters}
+          setFilters={setFilters}
+          handleApplyFilters={handleApplyFilters}
+          handleResetFilters={handleResetFilters}
+          availableTags={availableTags}
+          isAdmin={isAdmin}
         />
       )}
 
-      {/* Customer List */}
-      {loading && allCustomers.length === 0 ? (
-        <div className="text-center py-10">Loading customers...</div>
-      ) : (
-        <>
-          <CustomerList
-            customers={customers}
-            trackingCompanies={trackingCompanies}
-            handleSaveClick={handleSaveClick}
-            handleDeleteClick={handleDeleteClick}
-            handleAddQuick={handleQuickAdd}
-            handleBulkDelete={handleDeleteClick}
-            handleBulkExport={handleBulkExport}
-            handleBulkTag={handleBulkTag}
-            handleInitiateTagChange={handleInitiateTagChange} 
-          />
-          
-          {/* Pagination */}
-          <div className="flex justify-between items-center mt-4">
-            <div className="text-sm text-gray-600">
-              {Object.keys(activeFilters).length > 0 && (
-                <span className="font-medium">Filters applied • </span>
-              )}
-              {searchTerm && (
-                <span className="font-medium">Searching • </span>
-              )}
-              Showing {customers.length} of {totalFilteredCustomers} customers
-              {shopContext && (
-                <span className="text-gray-500"> • {shopContext.shopName}</span>
-              )}
-            </div>
-            <div className="flex items-center gap-4">
-              <button 
-                onClick={handlePrevPage} 
-                disabled={page <= 1 || loading} 
-                className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
-              >
-                <ChevronLeft className="w-4 h-4" /> Previous
-              </button>
-              <span className="text-sm text-gray-700 font-medium">
-                Page {page} of {totalPages || 1}
-              </span>
-              <button 
-                onClick={handleNextPage} 
-                disabled={isLastPage || loading} 
-                className="flex items-center gap-2 bg-white text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-100 transition border border-gray-300 disabled:opacity-50"
-              >
-                Next <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </>
+      {/* Edit Modal */}
+      <CustomerEditModal
+        show={editModalOpen}
+        customer={editingCustomer}
+        trackingCompanies={trackingCompanies}
+        onSave={handleSaveClick}
+        onClose={() => {
+          setEditModalOpen(false);
+          setEditingCustomer(null);
+        }}
+      />
+
+      {/* Tag Change Modal */}
+      {tagChangeInfo && (
+        <TagChangeConfirmModal
+          isOpen={!!tagChangeInfo}
+          onClose={() => setTagChangeInfo(null)}
+          onConfirm={handleConfirmTagChange}
+          selectedCount={tagChangeInfo.ids.length}
+          newTag={tagChangeInfo.newTag}
+        />
       )}
     </div>
   );

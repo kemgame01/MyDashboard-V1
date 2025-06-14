@@ -1,44 +1,50 @@
+// src/features/customers/CustomerFilters.jsx
 import React from 'react';
-import { Calendar, Filter, X } from 'lucide-react';
 
-const CustomerFilters = ({ filters, setFilters, tags, onApplyFilters, onResetFilters }) => {
+const CustomerFilters = ({ 
+  filters = {}, 
+  setFilters, 
+  availableTags = ['New', 'Active', 'Inactive', 'VIP'], // Default tags if none provided
+  onApply, 
+  onClear 
+}) => {
   const handleFilterChange = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
   };
 
-  const hasActiveFilters = Object.values(filters).some(v => v && v !== 'all');
+  const handleClear = () => {
+    const clearedFilters = {
+      tag: 'all',
+      dateFrom: null,
+      dateTo: null,
+      hasPhone: 'all',
+      hasAddress: 'all',
+      searchText: ''
+    };
+    setFilters(clearedFilters);
+    if (onClear) {
+      onClear();
+    }
+  };
 
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold flex items-center gap-2">
-          <Filter className="w-5 h-5" />
-          Advanced Filters
-        </h3>
-        {hasActiveFilters && (
-          <button
-            onClick={onResetFilters}
-            className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
-          >
-            <X className="w-4 h-4" />
-            Clear Filters
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="bg-gray-50 p-4 rounded-lg">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Tag Filter */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Tag
           </label>
           <select
-            value={filters.tag}
+            value={filters.tag || 'all'}
             onChange={(e) => handleFilterChange('tag', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All Tags</option>
-            {tags.map(tag => (
+            {Array.isArray(availableTags) && availableTags.map(tag => (
               <option key={tag} value={tag}>{tag}</option>
             ))}
           </select>
@@ -47,7 +53,7 @@ const CustomerFilters = ({ filters, setFilters, tags, onApplyFilters, onResetFil
         {/* Date From */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Created From
+            Date From
           </label>
           <input
             type="date"
@@ -60,7 +66,7 @@ const CustomerFilters = ({ filters, setFilters, tags, onApplyFilters, onResetFil
         {/* Date To */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Created To
+            Date To
           </label>
           <input
             type="date"
@@ -102,25 +108,32 @@ const CustomerFilters = ({ filters, setFilters, tags, onApplyFilters, onResetFil
           </select>
         </div>
 
-        {/* Text Search (covers name, email, company) */}
+        {/* Text Search */}
         <div className="md:col-span-2 lg:col-span-3">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Search (Name, Email, Phone, Company)
+            Search Text
           </label>
           <input
             type="text"
             value={filters.searchText || ''}
             onChange={(e) => handleFilterChange('searchText', e.target.value)}
-            placeholder="Search across all fields..."
+            placeholder="Search in name, email, phone..."
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
       </div>
 
-      <div className="mt-4 flex justify-end">
+      {/* Action Buttons */}
+      <div className="mt-4 flex gap-3 justify-end">
         <button
-          onClick={onApplyFilters}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+          onClick={handleClear}
+          className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition"
+        >
+          Clear Filters
+        </button>
+        <button
+          onClick={onApply}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
         >
           Apply Filters
         </button>
