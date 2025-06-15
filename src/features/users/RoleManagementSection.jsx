@@ -590,7 +590,7 @@ const RoleManagementSection = ({ currentUser }) => {
         </div>
       )}
 
-      {/* Dialogs */}
+     {/* Dialogs */}
       {dialog.type === 'user' && (
         <UserForm
           user={dialog.data}

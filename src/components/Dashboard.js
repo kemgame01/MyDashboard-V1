@@ -1,6 +1,6 @@
 // src/components/Dashboard.js
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom'; // ✅ CHANGED: Added useLocation
 import { signOut } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -26,7 +26,23 @@ import PendingInvitations from "../features/shops/PendingInvitations";
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
-  const [activeSection, setActiveSection] = useState('customers');
+  const location = useLocation(); // ✅ ADDED: Get location for URL params
+  
+  // ✅ CHANGED: Smart state initialization with URL and localStorage
+  const [activeSection, setActiveSection] = useState(() => {
+    // Check URL parameters first
+    const searchParams = new URLSearchParams(location.search);
+    const sectionFromUrl = searchParams.get('section');
+    if (sectionFromUrl) return sectionFromUrl;
+    
+    // Check localStorage
+    const savedSection = localStorage.getItem('lastActiveSection');
+    if (savedSection) return savedSection;
+    
+    // Default to customers
+    return 'customers';
+  });
+  
   const [currentSection, setCurrentSection] = useState({ key: 'customers', label: 'Dashboard' });
   const [shopContext, setShopContext] = useState(null);
   const [shopName, setShopName] = useState('');
@@ -52,6 +68,23 @@ const Dashboard = ({ user }) => {
     }
   }, [user]);
 
+  // ✅ ADDED: Persistence logic - saves section to localStorage and URL
+  useEffect(() => {
+    // Save active section whenever it changes
+    if (activeSection) {
+      localStorage.setItem('lastActiveSection', activeSection);
+      
+      // Update URL
+      const newSearchParams = new URLSearchParams(location.search);
+      newSearchParams.set('section', activeSection);
+      const newUrl = `${location.pathname}?${newSearchParams.toString()}`;
+      
+      if (window.location.pathname + window.location.search !== newUrl) {
+        navigate(newUrl, { replace: true });
+      }
+    }
+  }, [activeSection, navigate, location]);
+
   const handleShopChange = async (newShop) => {
     try {
       // Update local state
@@ -76,8 +109,10 @@ const Dashboard = ({ user }) => {
     }
   };
 
+  // ✅ CHANGED: Added localStorage cleanup on logout
   const handleLogout = async () => {
     try {
+      localStorage.removeItem('lastActiveSection'); // ✅ ADDED: Clear saved section
       await signOut(auth);
       navigate('/login');
     } catch (error) {
