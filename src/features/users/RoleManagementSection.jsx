@@ -133,81 +133,68 @@ const RoleManagementSection = ({ currentUser }) => {
         await logAudit({ 
           action: "updateUser", 
           performedBy: currentUser.email, 
-          target: formData.email, 
-          details: data 
+          target: data.email, 
+          details: { fields: Object.keys(data) } 
         });
       } else { 
-        // CREATE new user
+        // ADD new user
         if (!canAddUsers) {
           throw new Error("Only Root Admin can add new users.");
         }
         
-        // New users default to 'viewer' role as requested
-        const newUserData = {
-          ...formData,
-          role: formData.role || 'viewer',
+        const newUser = { 
+          ...formData, 
           createdAt: new Date(),
           updatedAt: new Date(),
           assignedShops: [],
-          currentShop: null,
-          isRootAdmin: false,
-          blocked: false
+          currentShop: null
         };
-        
-        await addDoc(collection(db, "users"), newUserData);
-        setToast("User added successfully with viewer role.");
+        await addDoc(collection(db, "users"), newUser);
+        setToast("User added successfully.");
         await logAudit({ 
-          action: "addUser", 
+          action: "createUser", 
           performedBy: currentUser.email, 
-          target: formData.email, 
-          details: newUserData 
+          target: formData.email 
         });
       }
+      
       await loadData();
     } catch (err) {
-      setError(`Failed to save user: ${err.message}`);
+      setError(err.message);
     } finally {
-      setDialog({ type: null, data: null });
       setLoading(false);
+      setDialog({ type: null, data: null });
     }
   };
 
   const handleDeleteUser = async (userId) => {
-    if (!canDeleteUsers) {
-      setError("Only Root Admin can delete users.");
-      return;
-    }
-    
+    setLoading(true);
+    setError("");
     try {
-      const userToDelete = users.find(u => u.id === userId);
+      const user = users.find(u => u.id === userId);
       await deleteDoc(doc(db, "users", userId));
       setToast("User deleted successfully.");
       await logAudit({ 
         action: "deleteUser", 
         performedBy: currentUser.email, 
-        target: userToDelete.email 
+        target: user.email 
       });
       await loadData();
     } catch (err) {
       setError("Failed to delete user: " + err.message);
     } finally {
+      setLoading(false);
       setDialog({ type: null, data: null });
     }
   };
 
-  const handleShopAssignment = async (user, assignment) => {
-    setError("");
-    setToast("");
+  const handleAssignUserToShop = async (user, assignment) => {
+    if (!assignment) return;
     
     // Permission checks
     if (!isRootAdmin) {
-      // Check if current user owns the shop they're assigning to
-      const ownsTargetShop = currentUser.assignedShops?.some(shop => 
-        shop.shopId === assignment.shopId && shop.isOwner
-      );
-      
-      if (!ownsTargetShop) {
-        setError("You can only assign users to shops you own.");
+      if (!canManageShopStaff(currentUser, assignment.shopId)) {
+        setError("You don't have permission to manage staff in this shop.");
         return;
       }
       
@@ -219,19 +206,33 @@ const RoleManagementSection = ({ currentUser }) => {
     }
     
     try {
+      // FIX: Ensure shopId is properly set
+      const shopId = assignment.shopId;
+      if (!shopId) {
+        setError("Invalid shop selection.");
+        return;
+      }
+
       const shopAssignment = createShopAssignment(
-        assignment.shopId, 
+        shopId,
         assignment.shopName, 
         assignment.role, 
         assignment.isOwner, 
         currentUser.uid
       );
       
+      // Check if user is already assigned to this shop
+      const existingAssignment = user.assignedShops?.find(a => a.shopId === shopId);
+      if (existingAssignment) {
+        setError("User is already assigned to this shop.");
+        return;
+      }
+      
       const updatedAssignments = [...(user.assignedShops || []), shopAssignment];
       
       await updateDoc(doc(db, "users", user.id), { 
         assignedShops: updatedAssignments, 
-        currentShop: user.currentShop || assignment.shopId,
+        currentShop: user.currentShop || shopId,
         updatedAt: new Date()
       });
       
@@ -242,7 +243,7 @@ const RoleManagementSection = ({ currentUser }) => {
         performedBy: currentUser.email, 
         target: user.email, 
         details: { 
-          shopId: assignment.shopId, 
+          shopId: shopId, 
           shopName: assignment.shopName,
           role: assignment.role,
           isOwner: assignment.isOwner 
@@ -250,6 +251,7 @@ const RoleManagementSection = ({ currentUser }) => {
       });
     } catch (err) {
       setError("Assignment failed: " + err.message);
+      console.error("Assignment error:", err);
     } finally {
       setDialog({ type: null, data: null });
     }
@@ -377,160 +379,165 @@ const RoleManagementSection = ({ currentUser }) => {
         </p>
       </div>
 
-      {/* Error/Success Messages */}
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start">
-          <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 mr-2" />
-          <div className="flex-1">
-            <p className="text-red-800">{error}</p>
-          </div>
-          <button onClick={() => setError("")} className="text-red-500 hover:text-red-700">
-            <X size={20} />
-          </button>
-        </div>
-      )}
-
+      {/* Toast and Error Messages */}
       {toast && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start">
-          <div className="flex-1">
-            <p className="text-green-800">{toast}</p>
+        <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-lg flex items-center justify-between">
+          <span>{toast}</span>
+          <button onClick={() => setToast("")} className="text-green-700 hover:text-green-900">
+            <X size={20} />
+          </button>
+        </div>
+      )}
+      
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={20} />
+            <span>{error}</span>
           </div>
-          <button onClick={() => setToast("")} className="text-green-500 hover:text-green-700">
+          <button onClick={() => setError("")} className="text-red-700 hover:text-red-900">
             <X size={20} />
           </button>
         </div>
       )}
 
-      {/* Shop Filter */}
-      {shops.length > 0 && (
-        <div className="mb-6">
-          <ShopSelector
-            user={currentUser}
-            shops={[{ id: 'all', shopName: 'All Shops' }, ...shops]}
-            selectedShop={selectedShop}
-            onShopChange={setSelectedShop}
-            includeAllOption={false}
-          />
+      {/* Shop Filter and Tabs */}
+      <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center gap-4">
+          {shops.length > 1 && (
+            <select
+              value={selectedShop}
+              onChange={(e) => setSelectedShop(e.target.value)}
+              className="border rounded-lg px-4 py-2"
+            >
+              <option value="all">All Shops</option>
+              {shops.map(shop => (
+                <option key={shop.id} value={shop.shopId}>
+                  {shop.shopName}
+                </option>
+              ))}
+            </select>
+          )}
+          
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`px-4 py-2 rounded-lg font-medium ${
+                activeTab === 'users' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <Users size={18} className="inline mr-2" />
+              Users ({filteredUsers.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('invitations')}
+              className={`px-4 py-2 rounded-lg font-medium ${
+                activeTab === 'invitations' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <Mail size={18} className="inline mr-2" />
+              Invitations ({filteredInvitations.length})
+            </button>
+          </div>
         </div>
-      )}
 
-      {/* Tab Navigation */}
-      <div className="border-b border-gray-200 mb-6">
-        <nav className="flex -mb-px">
+        {canAddUsers && (
           <button
-            onClick={() => setActiveTab('users')}
-            className={`mr-6 py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'users'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
+            onClick={() => setDialog({ type: 'user', data: null })}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
           >
-            <Users className="inline w-4 h-4 mr-2" />
-            Users ({filteredUsers.length})
+            <UserPlus size={20} />
+            Add New User
           </button>
-          <button
-            onClick={() => setActiveTab('invitations')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'invitations'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <Mail className="inline w-4 h-4 mr-2" />
-            Pending Invitations ({filteredInvitations.length})
-          </button>
-        </nav>
+        )}
       </div>
 
       {/* Content */}
       {activeTab === 'users' ? (
-        <div className="space-y-6">
-          {/* Add User Button - Only for Root Admin */}
-          {canAddUsers && (
-            <div className="flex justify-end">
-              <button
-                onClick={() => setDialog({ type: 'user', data: null })}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-              >
-                <UserPlus size={20} />
-                Add New User
-              </button>
+        <div className="space-y-4">
+          {filteredUsers.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <Users size={48} className="mx-auto mb-4 text-gray-300" />
+              <p>No users found for the selected filter.</p>
             </div>
-          )}
-
-          {/* Users List */}
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <ul className="divide-y divide-gray-200">
-              {filteredUsers.map((user) => (
-                <li key={user.id} className="px-6 py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <h3 className="text-lg font-medium text-gray-900">
-                            {user.displayName || user.email}
-                          </h3>
-                          <p className="text-sm text-gray-500">{user.email}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            user.isRootAdmin 
-                              ? 'bg-purple-100 text-purple-800' 
-                              : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {user.isRootAdmin ? 'Root Admin' : user.role || 'viewer'}
+          ) : (
+            <ul className="space-y-3">
+              {filteredUsers.map(user => (
+                <li key={user.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
+                  <div className="p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900">
+                          {user.displayName || user.name || user.email}
+                        </h3>
+                        <p className="text-sm text-gray-500">{user.email}</p>
+                        {user.phone && (
+                          <p className="text-sm text-gray-500">Phone: {user.phone}</p>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          user.isRootAdmin 
+                            ? 'bg-purple-100 text-purple-800' 
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {user.isRootAdmin ? 'Root Admin' : user.role || 'viewer'}
+                        </span>
+                        {user.blocked && (
+                          <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            Blocked
                           </span>
-                          {user.blocked && (
-                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              Blocked
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Shop Assignments */}
-                      <UserShopAssignments
-                        user={user}
-                        currentUser={currentUser}
-                        onRemoveAssignment={handleRemoveShopAssignment}
-                        onUpdateRole={handleUpdateShopRole}
-                      />
-
-                      {/* Action Buttons */}
-                      <div className="mt-3 flex items-center gap-3">
-                        {isRootAdmin && (
-                          <button
-                            onClick={() => setDialog({ type: 'user', data: user })}
-                            className="text-sm text-blue-600 hover:text-blue-800"
-                          >
-                            Edit User
-                          </button>
-                        )}
-                        
-                        {canManageStaff && shops.length > 0 && (
-                          <button
-                            onClick={() => setDialog({ type: 'assign', data: user })}
-                            className="text-sm text-green-600 hover:text-green-800"
-                          >
-                            Assign to Shop
-                          </button>
-                        )}
-                        
-                        {canDeleteUsers && user.id !== currentUser.uid && (
-                          <button
-                            onClick={() => setDialog({ type: 'delete', data: user })}
-                            className="text-sm text-red-600 hover:text-red-800"
-                          >
-                            Delete User
-                          </button>
                         )}
                       </div>
+                    </div>
+
+                    {/* Shop Assignments */}
+                    <UserShopAssignments
+                      user={user}
+                      currentUser={currentUser}
+                      onRemoveAssignment={handleRemoveShopAssignment}
+                      onUpdateRole={handleUpdateShopRole}
+                    />
+
+                    {/* Action Buttons */}
+                    <div className="mt-3 flex items-center gap-3">
+                      {isRootAdmin && (
+                        <button
+                          onClick={() => setDialog({ type: 'user', data: user })}
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          Edit User
+                        </button>
+                      )}
+                      
+                      {canManageStaff && shops.length > 0 && (
+                        <button
+                          onClick={() => setDialog({ type: 'assign', data: user })}
+                          className="text-sm text-green-600 hover:text-green-800"
+                        >
+                          Assign to Shop
+                        </button>
+                      )}
+                      
+                      {canDeleteUsers && user.id !== currentUser.uid && (
+                        <button
+                          onClick={() => setDialog({ type: 'delete', data: user })}
+                          className="text-sm text-red-600 hover:text-red-800"
+                        >
+                          Delete User
+                        </button>
+                      )}
                     </div>
                   </div>
                 </li>
               ))}
             </ul>
-          </div>
+          )}
 
           {/* Invite User Button */}
           {canManageStaff && shops.length > 0 && (
@@ -551,49 +558,45 @@ const RoleManagementSection = ({ currentUser }) => {
       ) : (
         <div className="space-y-4">
           {filteredInvitations.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-lg">
-              <Mail className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-              <p className="text-gray-500">No pending invitations</p>
+            <div className="text-center py-8 text-gray-500">
+              <Mail size={48} className="mx-auto mb-4 text-gray-300" />
+              <p>No pending invitations.</p>
             </div>
           ) : (
-            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-              <ul className="divide-y divide-gray-200">
-                {filteredInvitations.map((invitation) => (
-                  <li key={invitation.id} className="px-6 py-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {invitation.email}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          Role: {invitation.role} | Shop: {invitation.shopName}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Sent: {new Date(invitation.createdAt.toDate()).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleCancelInvitation(invitation.id)}
-                        className="text-red-600 hover:text-red-800 text-sm"
-                      >
-                        Cancel
-                      </button>
+            <ul className="space-y-3">
+              {filteredInvitations.map(invitation => (
+                <li key={invitation.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{invitation.email}</p>
+                      <p className="text-sm text-gray-500">
+                        Invited to: {invitation.shopName} as {invitation.role}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        By {invitation.invitedByName} • {new Date(invitation.createdAt?.toDate?.() || invitation.createdAt).toLocaleDateString()}
+                      </p>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                    <button
+                      onClick={() => handleCancelInvitation(invitation.id)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
 
-      {/* Modals */}
+      {/* Dialogs */}
       {dialog.type === 'user' && (
         <UserForm
           user={dialog.data}
           onSave={handleSaveUser}
           onClose={() => setDialog({ type: null, data: null })}
-          canChangeGlobalRole={canChangeGlobalRole(currentUser, dialog.data)}
+          isRootAdmin={isRootAdmin}
         />
       )}
 
@@ -602,7 +605,15 @@ const RoleManagementSection = ({ currentUser }) => {
           user={dialog.data}
           shops={shops}
           currentUser={currentUser}
-          onSave={handleShopAssignment}
+          onSave={(assignment) => handleAssignUserToShop(dialog.data, assignment)}
+          onClose={() => setDialog({ type: null, data: null })}
+        />
+      )}
+
+      {dialog.type === 'delete' && (
+        <UserDeleteDialog
+          user={dialog.data}
+          onConfirm={() => handleDeleteUser(dialog.data.id)}
           onClose={() => setDialog({ type: null, data: null })}
         />
       )}
@@ -611,15 +622,11 @@ const RoleManagementSection = ({ currentUser }) => {
         <ShopInvitationModal
           shop={dialog.data}
           currentUser={currentUser}
-          onClose={() => setDialog({ type: null, data: null })}
-          onSuccess={loadData}
-        />
-      )}
-
-      {dialog.type === 'delete' && (
-        <UserDeleteDialog
-          user={dialog.data}
-          onConfirm={() => handleDeleteUser(dialog.data.id)}
+          onSuccess={() => {
+            loadData();
+            setDialog({ type: null, data: null });
+            setToast("Invitation sent successfully!");
+          }}
           onClose={() => setDialog({ type: null, data: null })}
         />
       )}

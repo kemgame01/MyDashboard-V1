@@ -13,6 +13,7 @@ import SalesDashboard from '../features/sales/SalesDashboard';
 import CategoryBrandManager from './CategoryBrandManager';
 import ShopManager from '../features/shops/ShopManager';
 import UserProfile from '../features/userprofile/UserProfile';
+import ShopSelector from '../features/layout/ShopSelector';
 import { 
   canViewShopSales, 
   canManageShopInventory, 
@@ -22,46 +23,56 @@ import {
   getCurrentShop 
 } from "../utils/shopPermissions";
 import PendingInvitations from "../features/shops/PendingInvitations";
-import { ShopSelector } from '../features/shops/ShopManagementComponents';
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('customers');
   const [currentSection, setCurrentSection] = useState({ key: 'customers', label: 'Dashboard' });
   const [shopContext, setShopContext] = useState(null);
+  const [shopName, setShopName] = useState('');
+  const [toast, setToast] = useState('');
+  const [error, setError] = useState('');
 
   const isRootAdmin = user?.isRootAdmin === true;
   const isShopOwner = user?.assignedShops?.some(shop => shop.isOwner) || false;
+  const userRole = getCurrentShop(user)?.role || user?.role || 'viewer';
 
   useEffect(() => {
     // Set initial shop context
     if (user?.assignedShops?.length > 0) {
       const currentShopId = user.currentShop || user.assignedShops[0].shopId;
       const shop = user.assignedShops.find(s => s.shopId === currentShopId);
-      setShopContext(shop);
+      if (shop) {
+        setShopContext({
+          shopId: shop.shopId,
+          shopName: shop.shopName
+        });
+        setShopName(shop.shopName);
+      }
     }
   }, [user]);
 
-  const handleShopChange = async (shopId) => {
-    if (!user || !shopId) return;
-    
+  const handleShopChange = async (newShop) => {
     try {
-      // Update user's current shop in Firestore
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        currentShop: shopId,
-        updatedAt: new Date()
-      });
-      
       // Update local state
-      const newShop = user.assignedShops.find(s => s.shopId === shopId);
-      setShopContext(newShop);
+      const newShopId = newShop.shopId || newShop.id;
+      setShopContext({
+        shopId: newShopId,
+        shopName: newShop.shopName
+      });
+      setShopName(newShop.shopName);
       
-      // Reload page to refresh all data with new shop context
-      window.location.reload();
+      // Update user context (this will trigger a re-render)
+      // You might want to reload the current section data here
+      setToast(`Switched to ${newShop.shopName}`);
+      
+      // If on customers section, data will auto-reload with new shop context
+      if (activeSection === 'customers') {
+        // The CustomerSection component will handle reloading with new shop context
+      }
     } catch (error) {
       console.error('Error changing shop:', error);
-      alert('Failed to change shop. Please try again.');
+      setError('Failed to switch shop. Please try again.');
     }
   };
 
@@ -132,123 +143,106 @@ const Dashboard = ({ user }) => {
   const renderContent = () => {
     switch (activeSection) {
       case 'customers':
-        return <CustomerSection 
-          userId={user?.uid} 
-          user={user} 
-          shopContext={shopContext} 
-        />;
+        return <CustomerSection userId={user?.uid} shopContext={shopContext} />;
       case 'userProfile':
-        return <UserProfile targetUserId={user.uid} />;
+        return <UserProfile authUser={user} />;
       case 'roleManagement':
         return <RoleManagementSection currentUser={user} />;
       case 'taskManagement':
-        return <TaskManagementSection userId={user.uid} isRootAdmin={isRootAdmin} />;
+        return <TaskManagementSection userId={user?.uid} />;
       case 'inventory':
-        return <InventoryDashboard user={user} />;
+        return <InventoryDashboard userId={user?.uid} shopContext={shopContext} />;
       case 'sales':
-        return <SalesDashboard user={user} shopContext={shopContext} />;
+        return <SalesDashboard userId={user?.uid} shopContext={shopContext} />;
       case 'brandCategory':
         return <CategoryBrandManager />;
       case 'shopManagement':
         return <ShopManager user={user} />;
       default:
-        return <div className="flex items-center justify-center h-full text-gray-500">Section not found</div>;
+        return <CustomerSection userId={user?.uid} shopContext={shopContext} />;
     }
   };
 
-  // Special layout for Role Management section
-  if (activeSection === 'roleManagement') {
-    return (
-      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <Sidebar 
-          user={user} 
-          activeSection={activeSection} 
-          showSection={showSection} 
-          handleLogout={handleLogout}
-        />
-        <div className="flex-1 overflow-auto">
-          {renderContent()}
-        </div>
-      </div>
-    );
+  if (!user) {
+    return <div>Loading...</div>;
   }
 
-  // Main layout for other sections
   return (
-    <div className="flex h-screen bg-gradient-to-br from-gray-50 via-gray-50 to-gray-100">
-      <Sidebar 
-        user={user} 
-        activeSection={activeSection} 
-        showSection={showSection} 
-        handleLogout={handleLogout}
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Sidebar */}
+      <Sidebar
+        user={user}
+        showSection={showSection}
+        userRole={userRole}
+        isRootAdmin={isRootAdmin}
+        isShopOwner={isShopOwner}
+        activeSection={activeSection}
+        onLogout={handleLogout}
       />
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Professional Modern Header 2025 - Simplified */}
-        <header className="bg-white/80 backdrop-blur-xl shadow-lg border-b border-gray-100">
-          <div className="px-6 py-5">
-            <div className="flex justify-between items-center">
-              {/* Left Section - Title and Breadcrumb */}
-              <div className="flex flex-col space-y-1">
-                <div className="flex items-center space-x-3">
-                  <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
-                    {currentSection.label}
-                  </h1>
-                  {shopContext && (
-                    <div className="hidden sm:flex items-center space-x-2 px-3 py-1 bg-blue-50 rounded-full">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      <span className="text-sm font-medium text-blue-700">
-                        {shopContext.shopName}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                {/* Dynamic Breadcrumb */}
-                <div className="flex items-center space-x-2 text-sm text-gray-500">
-                  <span className="hover:text-gray-700 cursor-pointer transition-colors">Home</span>
-                  <span>›</span>
-                  <span className="text-gray-700 font-medium">{currentSection.label}</span>
-                </div>
-              </div>
 
-              {/* Right Section - Shop Selector Only */}
-              <div className="flex items-center">
-                {/* Shop Selector with enhanced styling */}
-                {user?.assignedShops?.length > 0 && (
-                  <div className="relative shop-selector-wrapper">
-                    <ShopSelector 
-                      user={user} 
-                      onShopChange={handleShopChange}
-                      className="shop-selector"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        {/* Navigation Bar */}
+        <nav className="flex items-center justify-between p-4 bg-white shadow-sm">
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-semibold">
+              {currentSection.label}
+            </h1>
+            {currentSection.key === 'customers' && shopName && (
+              <span className="text-sm text-gray-600">for {shopName}</span>
+            )}
           </div>
-        </header>
-
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-auto bg-transparent">
-          <div className="p-6 max-w-7xl mx-auto">
-            {/* Pending Invitations Card - Enhanced styling */}
-            {currentSection.key === 'customers' && user && (
-              <div className="mb-6 animate-fadeIn">
-                <PendingInvitations 
-                  user={user} 
-                  onUpdate={() => {
-                    // Refresh user data after accepting invitation
-                    window.location.reload();
-                  }} 
-                  className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow duration-300"
-                />
-              </div>
+          
+          <div className="flex items-center gap-4">
+            {/* Shop Selector for consistent shop display */}
+            {user && user.assignedShops && user.assignedShops.length > 0 && (
+              <ShopSelector 
+                user={user}
+                currentShop={shopContext?.shopId}
+                onShopChange={handleShopChange}
+              />
             )}
             
-            {/* Content Container with subtle animation */}
-            <div className="animate-slideUp">
-              {renderContent()}
+            {/* User Role Badge */}
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                isRootAdmin 
+                  ? 'bg-purple-100 text-purple-800' 
+                  : userRole === 'admin' || isShopOwner
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-gray-100 text-gray-800'
+              }`}>
+                {isRootAdmin ? 'Root Admin' : isShopOwner ? 'Owner' : userRole || 'User'}
+              </span>
             </div>
           </div>
+        </nav>
+
+        {/* Toast Messages */}
+        {toast && (
+          <div className="mx-4 mt-4 p-3 bg-green-100 text-green-700 rounded-lg flex items-center justify-between">
+            <span>{toast}</span>
+            <button onClick={() => setToast('')} className="text-green-700 hover:text-green-900">
+              ×
+            </button>
+          </div>
+        )}
+        
+        {error && (
+          <div className="mx-4 mt-4 p-3 bg-red-100 text-red-700 rounded-lg flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-700 hover:text-red-900">
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Pending Invitations Alert */}
+        <PendingInvitations user={user} />
+
+        {/* Content Area */}
+        <main className="flex-1 p-6 overflow-y-auto">
+          {renderContent()}
         </main>
       </div>
     </div>
@@ -256,26 +250,3 @@ const Dashboard = ({ user }) => {
 };
 
 export default Dashboard;
-
-// Add these CSS classes to your global styles or Tailwind config:
-// @keyframes fadeIn {
-//   from { opacity: 0; }
-//   to { opacity: 1; }
-// }
-// .animate-fadeIn {
-//   animation: fadeIn 0.3s ease-in-out;
-// }
-
-// @keyframes slideUp {
-//   from { 
-//     opacity: 0;
-//     transform: translateY(10px);
-//   }
-//   to { 
-//     opacity: 1;
-//     transform: translateY(0);
-//   }
-// }
-// .animate-slideUp {
-//   animation: slideUp 0.4s ease-out;
-// }
