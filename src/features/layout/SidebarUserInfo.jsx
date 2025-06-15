@@ -1,4 +1,5 @@
 import React from "react";
+import '../../styles/sidebar-profile-enhancement.css';
 
 // --- Helper Functions ---
 // Moved here from Sidebar.jsx for better encapsulation.
@@ -21,30 +22,56 @@ export default function SidebarUserInfo({ user }) {
   const userEmail = user.email || "-";
   const userRole = (user.role || "").toLowerCase();
   const isRootAdmin = user.isRootAdmin === true;
+  const isShopOwner = user.assignedShops?.some(shop => shop.isOwner) || false;
   const photoURL = user.photoURL || "";
+  
+  // Determine user status (you can make this dynamic based on real-time data)
+  const userStatus = 'online'; // 'online', 'away', 'busy', 'offline'
+  
+  const getRoleDisplay = () => {
+    if (isRootAdmin) return 'Root Admin';
+    if (isShopOwner) return 'Shop Owner';
+    return userRole || 'Staff';
+  };
 
   return (
-    <div className="flex items-center mb-6 space-x-3">
-      {photoURL ? (
-        <img
-          src={photoURL}
-          alt="User"
-          className="rounded-full w-12 h-12 object-cover border-2 border-blue-500 shadow"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        <div className="rounded-full bg-blue-500 w-12 h-12 flex items-center justify-center text-lg font-bold">
-          {getInitials(userName || userEmail)}
+    <div className="sidebar-profile-wrapper">
+      <div className="sidebar-profile">
+        {/* Profile Image with Online Status */}
+        <div className="sidebar-profile-image">
+          {photoURL ? (
+            <img
+              src={photoURL}
+              alt="User"
+              className="sidebar-profile-avatar-img"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="sidebar-profile-avatar">
+              {getInitials(userName || userEmail)}
+            </div>
+          )}
+          {/* Online Status Indicator */}
+          <div className={`online-status ${userStatus !== 'online' ? userStatus : ''}`}></div>
         </div>
-      )}
-      <div>
-        <div className="font-semibold text-white">{userName}</div>
-        <div className="text-xs text-white">{userEmail}</div>
-        <div className="text-xs text-white capitalize">
-          Role: {userRole || "-"}
-          {isRootAdmin && " / Root Admin"}
+        
+        {/* Profile Info */}
+        <div className="sidebar-profile-info">
+          <div className="sidebar-profile-name">{userName}</div>
+          <div className="sidebar-profile-email">{userEmail}</div>
+          <div className={`sidebar-profile-role ${
+            isRootAdmin ? 'root-admin' : isShopOwner ? 'shop-owner' : 'staff'
+          }`}>
+            {getRoleDisplay()}
+          </div>
+          <div className="sidebar-profile-id">ID: {getMaskedId(user.uid)}</div>
+          
+          {/* Optional: Status Text */}
+          <div className="sidebar-profile-status">
+            <span className="status-dot"></span>
+            <span>Active now</span>
+          </div>
         </div>
-        <div className="text-xs text-gray-300 break-all">ID: {getMaskedId(user.uid)}</div>
       </div>
     </div>
   );

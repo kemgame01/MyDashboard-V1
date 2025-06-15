@@ -22,8 +22,11 @@ const Sidebar = ({
 
   if (!user) {
     return (
-      <aside className="w-64 bg-gray-800 text-white flex flex-col items-center justify-center min-h-screen">
-        <div className="animate-pulse text-sm text-gray-400">Loading user...</div>
+      <aside className="w-64 bg-gradient-to-b from-gray-900 to-gray-800 text-white flex flex-col items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center space-y-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent"></div>
+          <div className="text-sm text-gray-400 animate-pulse">Loading user...</div>
+        </div>
       </aside>
     );
   }
@@ -73,51 +76,104 @@ const Sidebar = ({
 
   const sidebarContent = (
     <>
-      <SidebarUserInfo user={user} />
-      <ul className="space-y-2">
-        {navLinks
-          .filter((item) => item.show)
-          .map((item, idx) => (
-            <SidebarNavItem
-              key={idx}
-              item={item}
-              isActive={activeSection === (item.activeKey || item.label)}
-              isExpanded={expandedIdx === idx}
-              onExpand={setExpandedIdx}
-              expandedIdx={expandedIdx}
-              idx={idx}
-              setMobileOpen={setMobileOpen}
-              onClick={() => {}}
-            />
-          ))}
-      </ul>
-      <SidebarLogoutButton handleLogout={handleLogout} />
+      {/* Enhanced User Info Section */}
+      <div className="mb-5"> {/* 20px margin bottom */}
+        <SidebarUserInfo user={user} />
+      </div>
+      
+      {/* Navigation with enhanced styling */}
+      <nav className="flex-1 overflow-y-auto custom-scrollbar">
+        <ul className="space-y-1 px-2">
+          {navLinks
+            .filter((item) => item.show)
+            .map((item, idx) => (
+              <SidebarNavItem
+                key={idx}
+                item={item}
+                isActive={activeSection === (item.activeKey || item.label)}
+                isExpanded={expandedIdx === idx}
+                onExpand={setExpandedIdx}
+                expandedIdx={expandedIdx}
+                idx={idx}
+                setMobileOpen={setMobileOpen}
+                onClick={() => {}}
+                className="sidebar-nav-item"
+              />
+            ))}
+        </ul>
+      </nav>
+      
+      {/* Enhanced Logout Button */}
+      <div className="mt-6 pt-6 border-t border-gray-700/50">
+        <SidebarLogoutButton handleLogout={handleLogout} />
+      </div>
     </>
   );
 
   return (
     <>
-      {/* Hamburger (mobile) */}
+      {/* Enhanced Mobile Hamburger */}
       <button
-        className="lg:hidden fixed top-4 left-4 z-50 bg-gray-800 text-white p-2 rounded-md focus:outline-none"
+        className="lg:hidden fixed top-4 left-4 z-50 bg-gray-900/90 backdrop-blur-sm text-white p-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
         onClick={() => setMobileOpen((open) => !open)}
         aria-label="Open sidebar"
         tabIndex={0}
       >
-        {mobileOpen ? <X size={28} /> : <Menu size={28} />}
+        {mobileOpen ? <X size={24} /> : <Menu size={24} />}
       </button>
 
-      {/* Desktop sidebar */}
+      {/* Enhanced Desktop Sidebar */}
       <aside
-        className="hidden lg:flex flex-col justify-between w-64 bg-gray-800 text-white p-6 min-h-screen"
+        className="hidden lg:flex flex-col w-64 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white shadow-2xl min-h-screen relative overflow-hidden"
         style={{ minHeight: "100vh" }}
       >
-        {sidebarContent}
+        {/* Background Pattern */}
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute inset-0" style={{
+            backgroundImage: `radial-gradient(circle at 20% 50%, rgba(120, 180, 255, 0.1) 0%, transparent 50%),
+                             radial-gradient(circle at 80% 80%, rgba(120, 180, 255, 0.05) 0%, transparent 50%)`
+          }}></div>
+        </div>
+        
+        {/* Content */}
+        <div className="relative flex flex-col h-full p-6">
+          {/* Enhanced User Info Section */}
+          <div className="mb-5"> {/* 20px margin bottom */}
+            <SidebarUserInfo user={user} />
+          </div>
+          
+          {/* Navigation with enhanced styling */}
+          <nav className="flex-1 overflow-y-auto custom-scrollbar">
+            <ul className="space-y-1 px-2">
+              {navLinks
+                .filter((item) => item.show)
+                .map((item, idx) => (
+                  <SidebarNavItem
+                    key={idx}
+                    item={item}
+                    isActive={activeSection === (item.activeKey || item.label)}
+                    isExpanded={expandedIdx === idx}
+                    onExpand={setExpandedIdx}
+                    expandedIdx={expandedIdx}
+                    idx={idx}
+                    setMobileOpen={setMobileOpen}
+                    onClick={() => {}}
+                    className="sidebar-nav-item"
+                  />
+                ))}
+            </ul>
+          </nav>
+          
+          {/* Enhanced Logout Button */}
+          <div className="mt-6 pt-6 border-t border-gray-700/50">
+            <SidebarLogoutButton handleLogout={handleLogout} />
+          </div>
+        </div>
       </aside>
 
-      {/* Mobile Drawer */}
+      {/* Enhanced Mobile Drawer */}
       <aside
-        className={`fixed top-0 left-0 z-40 bg-gray-800 text-white w-64 h-full flex flex-col justify-between p-6 transform transition-transform duration-200 ${
+        className={`fixed top-0 left-0 z-40 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-white w-64 h-full flex flex-col shadow-2xl transform transition-all duration-300 ease-out ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         } lg:hidden`}
         style={{ minHeight: "100vh" }}
@@ -125,13 +181,53 @@ const Sidebar = ({
         aria-modal="true"
         role="dialog"
       >
-        {sidebarContent}
+        {/* Background Pattern for Mobile */}
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute inset-0" style={{
+            backgroundImage: `radial-gradient(circle at 20% 50%, rgba(120, 180, 255, 0.1) 0%, transparent 50%)`
+          }}></div>
+        </div>
+        
+        {/* Content */}
+        <div className="relative flex flex-col h-full p-6">
+          {/* Enhanced User Info Section */}
+          <div className="mb-5"> {/* 20px margin bottom */}
+            <SidebarUserInfo user={user} />
+          </div>
+          
+          {/* Navigation with enhanced styling */}
+          <nav className="flex-1 overflow-y-auto custom-scrollbar">
+            <ul className="space-y-1 px-2">
+              {navLinks
+                .filter((item) => item.show)
+                .map((item, idx) => (
+                  <SidebarNavItem
+                    key={idx}
+                    item={item}
+                    isActive={activeSection === (item.activeKey || item.label)}
+                    isExpanded={expandedIdx === idx}
+                    onExpand={setExpandedIdx}
+                    expandedIdx={expandedIdx}
+                    idx={idx}
+                    setMobileOpen={setMobileOpen}
+                    onClick={() => {}}
+                    className="sidebar-nav-item"
+                  />
+                ))}
+            </ul>
+          </nav>
+          
+          {/* Enhanced Logout Button */}
+          <div className="mt-6 pt-6 border-t border-gray-700/50">
+            <SidebarLogoutButton handleLogout={handleLogout} />
+          </div>
+        </div>
       </aside>
       
-      {/* Overlay when sidebar open */}
+      {/* Enhanced Overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity duration-300"
           onClick={() => setMobileOpen(false)}
           aria-label="Close sidebar overlay"
         />

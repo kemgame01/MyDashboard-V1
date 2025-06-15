@@ -1,5 +1,6 @@
 import React from "react";
 import { ExternalLink } from "lucide-react";
+import '../../styles/sidebar-profile-enhancement.css';
 
 export default function SidebarNavItem({
   item,
@@ -32,35 +33,36 @@ export default function SidebarNavItem({
       };
 
   return (
-    <li>
+    <li className="sidebar-nav-item">
       <div className="flex flex-col">
         <NavButton
           {...navProps}
-          className={`flex items-center gap-3 w-full text-left p-2 rounded transition font-medium
-            hover:bg-gray-700
-            ${isActive ? "bg-[#223163] text-white" : ""}
-            ${isExternal ? "pr-3" : ""}
-          `}
+          className={`sidebar-nav-button ${isActive ? 'active' : ''} ${isExternal ? 'external' : ''}`}
         >
-          <span>{item.icon}</span>
-          <span>{item.label}</span>
-          {item.badge !== undefined && (
-            <span className="ml-2 bg-blue-500 text-white text-xs rounded-full px-2 py-0.5">
-              {item.badge}
-            </span>
-          )}
-          {item.external && (
-            <span className="ml-2">
-              <ExternalLink size={15} />
-            </span>
-          )}
-          {item.children && (
-            <span className="ml-auto">{isExpanded ? "▾" : "▸"}</span>
-          )}
+          <div className="sidebar-nav-content">
+            <span className="sidebar-nav-icon">{item.icon}</span>
+            <span className="sidebar-nav-label">{item.label}</span>
+            {item.badge !== undefined && (
+              <span className="sidebar-nav-badge">
+                {item.badge}
+              </span>
+            )}
+            {item.external && (
+              <span className="sidebar-nav-external">
+                <ExternalLink size={15} />
+              </span>
+            )}
+            {item.children && (
+              <span className={`sidebar-nav-chevron ${isExpanded ? 'expanded' : ''}`}>
+                {isExpanded ? "▾" : "▸"}
+              </span>
+            )}
+          </div>
         </NavButton>
+        
         {/* Subnav */}
-        {item.children && isExpanded && (
-          <ul className="ml-7 mt-1 space-y-1">
+        {item.children && (
+          <ul className={`sidebar-subnav ${isExpanded ? 'expanded' : ''}`}>
             {item.children.map((sub, subIdx) => (
               <li key={subIdx}>
                 <button
@@ -69,14 +71,12 @@ export default function SidebarNavItem({
                     sub.onClick();
                     onClick?.(sub.activeKey || sub.label);
                   }}
-                  className={`flex items-center gap-2 w-full text-left text-gray-300 hover:text-white hover:bg-gray-700 p-2 rounded transition
-                    ${isActive === (sub.activeKey || sub.label) ? "bg-[#223163] text-white" : ""}
-                  `}
+                  className={`sidebar-subnav-button ${isActive === (sub.activeKey || sub.label) ? 'active' : ''}`}
                 >
-                  <span>{sub.icon}</span>
-                  <span>{sub.label}</span>
+                  <span className="sidebar-subnav-icon">{sub.icon}</span>
+                  <span className="sidebar-subnav-label">{sub.label}</span>
                   {sub.badge !== undefined && (
-                    <span className="ml-2 bg-blue-500 text-white text-xs rounded-full px-2 py-0.5">
+                    <span className="sidebar-subnav-badge">
                       {sub.badge}
                     </span>
                   )}

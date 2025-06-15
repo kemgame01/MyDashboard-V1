@@ -23,17 +23,12 @@ import {
 } from "../utils/shopPermissions";
 import PendingInvitations from "../features/shops/PendingInvitations";
 import { ShopSelector } from '../features/shops/ShopManagementComponents';
-import { AlertTriangle, Database, X } from 'lucide-react';
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('customers');
   const [currentSection, setCurrentSection] = useState({ key: 'customers', label: 'Dashboard' });
   const [shopContext, setShopContext] = useState(null);
-  const [showMigrationButton, setShowMigrationButton] = useState(true);
-  const [migrationStatus, setMigrationStatus] = useState('');
-  const [migrationError, setMigrationError] = useState('');
-  const [isMigrating, setIsMigrating] = useState(false);
 
   const isRootAdmin = user?.isRootAdmin === true;
   const isShopOwner = user?.assignedShops?.some(shop => shop.isOwner) || false;
@@ -46,59 +41,6 @@ const Dashboard = ({ user }) => {
       setShopContext(shop);
     }
   }, [user]);
-
-  // Quick Migration Function
-  const runQuickMigration = async () => {
-    if (!isRootAdmin) {
-      alert('Only Root Admin can run migrations');
-      return;
-    }
-    
-    const confirmMessage = `
-🚨 FIRESTORE MIGRATION WARNING 🚨
-
-This will:
-• Create new collections: userRoles and shopMembers
-• Restructure your data for better security rules
-• This is a ONE-TIME operation
-
-⚠️ Make sure you have a backup of your Firestore data!
-
-Do you want to proceed?`;
-    
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-    
-    setIsMigrating(true);
-    setMigrationStatus('Starting migration...');
-    setMigrationError('');
-    
-    try {
-      // Dynamic import to avoid issues if file doesn't exist
-      const { migrateUsersToDenormalizedStructure } = await import('../utils/firestoreMigration');
-      
-      console.log('Starting Firestore migration...');
-      setMigrationStatus('Processing users and creating denormalized structure...');
-      
-      const result = await migrateUsersToDenormalizedStructure();
-      
-      setMigrationStatus(`✅ Migration completed successfully! Processed ${result.processedCount} users.`);
-      console.log('Migration result:', result);
-      
-      // Hide button after successful migration
-      setTimeout(() => {
-        setShowMigrationButton(false);
-      }, 5000);
-      
-    } catch (error) {
-      console.error('Migration failed:', error);
-      setMigrationError(`❌ Migration failed: ${error.message}`);
-      setMigrationStatus('');
-    } finally {
-      setIsMigrating(false);
-    }
-  };
 
   const handleShopChange = async (shopId) => {
     if (!user || !shopId) return;
@@ -187,12 +129,9 @@ Do you want to proceed?`;
     }
   };
 
-  // In Dashboard.js, update the renderContent function:
-
   const renderContent = () => {
     switch (activeSection) {
       case 'customers':
-        // FIXED: Pass required props to CustomerSection
         return <CustomerSection 
           userId={user?.uid} 
           user={user} 
@@ -213,14 +152,14 @@ Do you want to proceed?`;
       case 'shopManagement':
         return <ShopManager user={user} />;
       default:
-        return <div>Section not found</div>;
+        return <div className="flex items-center justify-center h-full text-gray-500">Section not found</div>;
     }
   };
 
-  // No need for header when sections handle their own layout
+  // Special layout for Role Management section
   if (activeSection === 'roleManagement') {
     return (
-      <div className="flex h-screen bg-gray-100">
+      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-gray-100">
         <Sidebar 
           user={user} 
           activeSection={activeSection} 
@@ -234,101 +173,109 @@ Do you want to proceed?`;
     );
   }
 
-  // Original layout for other sections
+  // Main layout for other sections
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-gradient-to-br from-gray-50 via-gray-50 to-gray-100">
       <Sidebar 
         user={user} 
         activeSection={activeSection} 
         showSection={showSection} 
         handleLogout={handleLogout}
       />
-      <div className="flex-1 overflow-auto">
-        <header className="bg-white shadow-sm border-b">
-          <div className="px-6 py-4 flex justify-between items-center">
-            <h1 className="text-2xl font-semibold text-gray-800">{currentSection.label}</h1>
-            <ShopSelector user={user} onShopChange={handleShopChange} />
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {/* Professional Modern Header 2025 - Simplified */}
+        <header className="bg-white/80 backdrop-blur-xl shadow-lg border-b border-gray-100">
+          <div className="px-6 py-5">
+            <div className="flex justify-between items-center">
+              {/* Left Section - Title and Breadcrumb */}
+              <div className="flex flex-col space-y-1">
+                <div className="flex items-center space-x-3">
+                  <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
+                    {currentSection.label}
+                  </h1>
+                  {shopContext && (
+                    <div className="hidden sm:flex items-center space-x-2 px-3 py-1 bg-blue-50 rounded-full">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-medium text-blue-700">
+                        {shopContext.shopName}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {/* Dynamic Breadcrumb */}
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <span className="hover:text-gray-700 cursor-pointer transition-colors">Home</span>
+                  <span>›</span>
+                  <span className="text-gray-700 font-medium">{currentSection.label}</span>
+                </div>
+              </div>
+
+              {/* Right Section - Shop Selector Only */}
+              <div className="flex items-center">
+                {/* Shop Selector with enhanced styling */}
+                {user?.assignedShops?.length > 0 && (
+                  <div className="relative shop-selector-wrapper">
+                    <ShopSelector 
+                      user={user} 
+                      onShopChange={handleShopChange}
+                      className="shop-selector"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </header>
-        <main className="p-6">
-          {/* Show pending invitations at the top if on dashboard/customers section */}
-          {currentSection.key === 'customers' && user && (
-            <PendingInvitations 
-              user={user} 
-              onUpdate={() => {
-                // Refresh user data after accepting invitation
-                window.location.reload();
-              }} 
-            />
-          )}
-          {renderContent()}
-        </main>
-      </div>
 
-      {/* Migration Button - Only visible to Root Admin */}
-      {isRootAdmin && showMigrationButton && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl p-4 max-w-md">
-            {/* Close button */}
-            <button
-              onClick={() => setShowMigrationButton(false)}
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
-            >
-              <X size={20} />
-            </button>
-
-            {/* Migration status messages */}
-            {migrationStatus && (
-              <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
-                {migrationStatus}
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-auto bg-transparent">
+          <div className="p-6 max-w-7xl mx-auto">
+            {/* Pending Invitations Card - Enhanced styling */}
+            {currentSection.key === 'customers' && user && (
+              <div className="mb-6 animate-fadeIn">
+                <PendingInvitations 
+                  user={user} 
+                  onUpdate={() => {
+                    // Refresh user data after accepting invitation
+                    window.location.reload();
+                  }} 
+                  className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 hover:shadow-md transition-shadow duration-300"
+                />
               </div>
             )}
             
-            {migrationError && (
-              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
-                {migrationError}
-              </div>
-            )}
-
-            {/* Migration button and info */}
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <Database className="text-orange-500 mt-1" size={24} />
-                <div>
-                  <h3 className="font-semibold text-gray-900">Firestore Migration Available</h3>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Migrate to denormalized structure for better security rules
-                  </p>
-                </div>
-              </div>
-              
-              <button 
-                onClick={runQuickMigration}
-                disabled={isMigrating}
-                className="w-full bg-orange-600 text-white px-4 py-2 rounded-lg shadow hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {isMigrating ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                    <span>Migrating...</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle size={20} />
-                    <span>Run One-Time Migration</span>
-                  </>
-                )}
-              </button>
-              
-              <p className="text-xs text-gray-500 text-center">
-                This button will disappear after migration
-              </p>
+            {/* Content Container with subtle animation */}
+            <div className="animate-slideUp">
+              {renderContent()}
             </div>
           </div>
-        </div>
-      )}
+        </main>
+      </div>
     </div>
   );
 };
 
 export default Dashboard;
+
+// Add these CSS classes to your global styles or Tailwind config:
+// @keyframes fadeIn {
+//   from { opacity: 0; }
+//   to { opacity: 1; }
+// }
+// .animate-fadeIn {
+//   animation: fadeIn 0.3s ease-in-out;
+// }
+
+// @keyframes slideUp {
+//   from { 
+//     opacity: 0;
+//     transform: translateY(10px);
+//   }
+//   to { 
+//     opacity: 1;
+//     transform: translateY(0);
+//   }
+// }
+// .animate-slideUp {
+//   animation: slideUp 0.4s ease-out;
+// }

@@ -1,12 +1,15 @@
 import React from "react";
+import { LogOut } from "lucide-react";
+import '../../styles/sidebar-profile-enhancement.css';
 
 export default function SidebarLogoutButton({ handleLogout }) {
   return (
     <button
       onClick={handleLogout}
-      className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 transition mt-auto w-full"
+      className="sidebar-logout-button"
     >
-      Logout
+      <LogOut size={18} className="sidebar-logout-icon" />
+      <span className="sidebar-logout-text">Logout</span>
     </button>
   );
 }

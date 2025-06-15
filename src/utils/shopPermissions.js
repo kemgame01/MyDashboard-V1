@@ -344,3 +344,61 @@ export const getManagedShops = (user) => {
     shop.isOwner || shop.role === 'admin'
   ) || [];
 };
+
+// Add these functions to your src/utils/shopPermissions.js file at the end
+// DO NOT add any import statements - they should already be at the top of your file
+
+/**
+ * Check if user can view customers
+ */
+export const canViewCustomers = (user, shopContext) => {
+  if (!user) return false;
+  
+  // Root Admin can view all customers
+  if (user.isRootAdmin) return true;
+  
+  // Must have a shop context to view customers
+  if (!shopContext?.shopId) return false;
+  
+  // Check if user has access to the shop
+  const hasShopAccess = user.assignedShops?.some(
+    shop => shop.shopId === shopContext.shopId
+  );
+  
+  return hasShopAccess;
+};
+
+/**
+ * Check if user can edit/add/delete customers
+ */
+export const canEditCustomer = (user, shopContext) => {
+  if (!user) return false;
+  
+  // Root Admin can edit all customers
+  if (user.isRootAdmin) return true;
+  
+  // Must have a shop context to edit customers
+  if (!shopContext?.shopId) return false;
+  
+  // Check if user has access to the shop
+  const shopAssignment = user.assignedShops?.find(
+    shop => shop.shopId === shopContext.shopId
+  );
+  
+  if (!shopAssignment) return false;
+  
+  // Check role permissions
+  const role = shopAssignment.role;
+  
+  // Owners and admins can always edit
+  if (shopAssignment.isOwner || role === 'admin') return true;
+  
+  // Managers and staff can edit customers
+  if (role === 'manager' || role === 'staff') return true;
+  
+  // Sales role would need to manage customers too
+  if (role === 'sales') return true;
+  
+  // Viewers cannot edit
+  return false;
+};

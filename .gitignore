@@ -24,5 +24,4 @@ yarn-error.log*
 src/firebase.js
 firestore.rules
 firestore.indexes.json
-package-lock.json
-package.json
+.firebaserc

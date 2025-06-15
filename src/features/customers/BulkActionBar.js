@@ -1,66 +1,77 @@
-// src/features/customers/BulkActionBar.js
-import React from "react";
-import { Download, Trash2, Tag } from 'lucide-react';
+// src/features/customers/BulkActionBar.jsx
+import React from 'react';
+import { Trash2, Download, Tag } from 'lucide-react';
+import '../../styles/CustomerSection.css'; // Import CSS from styles folder
 
 export default function BulkActionBar({
   selectedCount,
   onBulkDelete,
   onBulkExport,
-  onBulkTag,
-  availableTags = ['New', 'Active', 'Inactive', 'VIP', 'Blocked'],
-  isAdmin = false
+  onBulkTag
 }) {
-  if (selectedCount === 0) return null;
-  
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg mb-4 p-3">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-blue-900">
-            {selectedCount} customer{selectedCount > 1 ? 's' : ''} selected
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          {/* Export Button */}
-          <button
-            className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm"
-            onClick={onBulkExport}
+    <div className="bulk-action-bar">
+      <div className="bulk-action-info">
+        {selectedCount} customer{selectedCount > 1 ? 's' : ''} selected
+      </div>
+      
+      <div className="bulk-action-buttons">
+        <button
+          onClick={onBulkExport}
+          className="customer-btn customer-btn-secondary"
+          title="Export selected customers"
+        >
+          <Download size={16} />
+          Export
+        </button>
+
+        <div className="relative inline-block">
+          <select
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === 'remove') {
+                // Pass empty string to remove tags
+                onBulkTag('');
+                e.target.value = '';
+              } else if (value) {
+                onBulkTag(value);
+                e.target.value = '';
+              }
+            }}
+            className="customer-btn customer-btn-secondary"
+            style={{ paddingRight: '2rem' }}
           >
-            <Download className="w-4 h-4" />
-            Export
-          </button>
-          
-          {/* Delete Button - Admin only */}
-          {isAdmin && (
-            <button
-              className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm"
-              onClick={onBulkDelete}
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete
-            </button>
-          )}
-          
-          {/* Tag Dropdown */}
-          <div className="relative group">
-            <button className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 transition text-sm">
-              <Tag className="w-4 h-4" />
+            <option value="">
               Tag as...
-            </button>
-            <div className="absolute top-full mt-1 right-0 bg-white border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 min-w-[120px]">
-              {availableTags.map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => onBulkTag(tag)}
-                  className="block w-full text-left px-3 py-2 hover:bg-gray-100 text-sm first:rounded-t-lg last:rounded-b-lg"
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          </div>
+            </option>
+            <option value="New">New</option>
+            <option value="VIP">VIP</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+            <option value="Blocked">Blocked</option>
+            <option disabled>──────</option>
+            <option value="remove">Remove Tags</option>
+          </select>
+          <Tag 
+            size={16} 
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 pointer-events-none text-gray-600" 
+          />
         </div>
+
+        <button
+          onClick={onBulkDelete}
+          className="customer-btn"
+          style={{
+            backgroundColor: '#dc2626',
+            color: 'white'
+          }}
+          onMouseEnter={(e) => e.target.style.backgroundColor = '#b91c1c'}
+          onMouseLeave={(e) => e.target.style.backgroundColor = '#dc2626'}
+          title="Delete selected customers"
+        >
+          <Trash2 size={16} />
+          Delete
+        </button>
       </div>
     </div>
   );

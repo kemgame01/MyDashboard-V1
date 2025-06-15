@@ -1,145 +1,115 @@
 // src/features/customers/CustomerFilters.jsx
 import React from 'react';
+import { X } from 'lucide-react';
+import '../../styles/CustomerSection.css';
 
-const CustomerFilters = ({ 
-  filters = {}, 
-  setFilters, 
-  availableTags = ['New', 'Active', 'Inactive', 'VIP'], // Default tags if none provided
-  onApply, 
-  onClear 
-}) => {
-  const handleFilterChange = (key, value) => {
+export default function CustomerFilters({
+  filters,
+  setFilters,
+  onApply,
+  onReset,
+  availableTags
+}) {
+  const handleChange = (field, value) => {
     setFilters(prev => ({
       ...prev,
-      [key]: value
+      [field]: value
     }));
   };
 
-  const handleClear = () => {
-    const clearedFilters = {
-      tag: 'all',
-      dateFrom: null,
-      dateTo: null,
-      hasPhone: 'all',
-      hasAddress: 'all',
-      searchText: ''
-    };
-    setFilters(clearedFilters);
-    if (onClear) {
-      onClear();
-    }
-  };
-
   return (
-    <div className="bg-gray-50 p-4 rounded-lg">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 animate-slideDown">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-gray-900">Filter Customers</h3>
+        <button
+          onClick={onReset}
+          className="text-sm text-gray-500 hover:text-gray-700"
+        >
+          Reset all
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Tag Filter */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Tag
-          </label>
+        <div className="customer-form-group">
+          <label className="customer-form-label">Tag</label>
           <select
-            value={filters.tag || 'all'}
-            onChange={(e) => handleFilterChange('tag', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={filters.tag}
+            onChange={(e) => handleChange('tag', e.target.value)}
+            className="customer-form-input"
           >
             <option value="all">All Tags</option>
-            {Array.isArray(availableTags) && availableTags.map(tag => (
+            {availableTags.map(tag => (
               <option key={tag} value={tag}>{tag}</option>
             ))}
           </select>
         </div>
 
+        {/* Has Phone Filter */}
+        <div className="customer-form-group">
+          <label className="customer-form-label">Has Phone</label>
+          <select
+            value={filters.hasPhone}
+            onChange={(e) => handleChange('hasPhone', e.target.value)}
+            className="customer-form-input"
+          >
+            <option value="all">All</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+
+        {/* Has Address Filter */}
+        <div className="customer-form-group">
+          <label className="customer-form-label">Has Address</label>
+          <select
+            value={filters.hasAddress}
+            onChange={(e) => handleChange('hasAddress', e.target.value)}
+            className="customer-form-input"
+          >
+            <option value="all">All</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+
         {/* Date From */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Date From
-          </label>
+        <div className="customer-form-group">
+          <label className="customer-form-label">Date From</label>
           <input
             type="date"
-            value={filters.dateFrom || ''}
-            onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={filters.dateFrom}
+            onChange={(e) => handleChange('dateFrom', e.target.value)}
+            className="customer-form-input"
           />
         </div>
 
         {/* Date To */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Date To
-          </label>
+        <div className="customer-form-group">
+          <label className="customer-form-label">Date To</label>
           <input
             type="date"
-            value={filters.dateTo || ''}
-            onChange={(e) => handleFilterChange('dateTo', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        {/* Has Phone */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Has Phone
-          </label>
-          <select
-            value={filters.hasPhone || 'all'}
-            onChange={(e) => handleFilterChange('hasPhone', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All</option>
-            <option value="yes">With Phone</option>
-            <option value="no">Without Phone</option>
-          </select>
-        </div>
-
-        {/* Has Address */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Has Address
-          </label>
-          <select
-            value={filters.hasAddress || 'all'}
-            onChange={(e) => handleFilterChange('hasAddress', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All</option>
-            <option value="yes">With Address</option>
-            <option value="no">Without Address</option>
-          </select>
-        </div>
-
-        {/* Text Search */}
-        <div className="md:col-span-2 lg:col-span-3">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Search Text
-          </label>
-          <input
-            type="text"
-            value={filters.searchText || ''}
-            onChange={(e) => handleFilterChange('searchText', e.target.value)}
-            placeholder="Search in name, email, phone..."
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={filters.dateTo}
+            onChange={(e) => handleChange('dateTo', e.target.value)}
+            className="customer-form-input"
           />
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="mt-4 flex gap-3 justify-end">
+      <div className="flex justify-end gap-3 mt-4">
         <button
-          onClick={handleClear}
-          className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition"
+          onClick={onReset}
+          className="customer-btn customer-btn-secondary"
         >
           Clear Filters
         </button>
         <button
           onClick={onApply}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+          className="customer-btn customer-btn-primary"
         >
           Apply Filters
         </button>
       </div>
     </div>
   );
-};
-
-export default CustomerFilters;
+}

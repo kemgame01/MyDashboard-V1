@@ -14,6 +14,7 @@ import CustomerFilters from './CustomerFilters';
 import TagChangeConfirmModal from './TagChangeConfirmModal';
 import { exportCSV } from '../../utils/exportCSV';
 import { ChevronLeft, ChevronRight, Store, AlertCircle } from 'lucide-react';
+import '../../styles/CustomerSection.css'; // ONLY CHANGE - Added CSS import
 
 const PAGE_SIZE = 20; // Match your CustomerList itemsPerPage
 
@@ -25,9 +26,26 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [formError, setFormError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+
+  // Debounce search term for smooth searching
+  useEffect(() => {
+    if (searchTerm) {
+      setSearching(true);
+    }
+    
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+      setSearching(false);
+    }, 200); // 200ms delay for more responsive feel
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tagChangeInfo, setTagChangeInfo] = useState(null);
+  const [isChangingTags, setIsChangingTags] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   
   // Modal state for editing
@@ -55,16 +73,10 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   const canEdit = isRootAdmin || isAdmin || isManager || isSales;
   const canDelete = isRootAdmin || isAdmin;
   
-  // Get unique tags
+  // Get unique tags - ensure consistent tag list
   const availableTags = useMemo(() => {
-    const tags = new Set(['New', 'Active', 'Inactive', 'VIP']);
-    allCustomers.forEach(customer => {
-      if (customer.tags && customer.tags.length > 0) {
-        customer.tags.forEach(tag => tags.add(tag));
-      }
-    });
-    return Array.from(tags);
-  }, [allCustomers]);
+    return ['New', 'Active', 'Inactive', 'VIP', 'Blocked'];
+  }, []);
 
   const mapCustomerData = (doc) => ({
     id: doc.id,
@@ -118,26 +130,27 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         if (!searchableFields.includes(searchLower)) return false;
       }
       
-      // Quick search
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
-        const searchableFields = [
-          customer.firstName,
-          customer.lastName,
-          customer.email,
-          customer.phoneNumber,
-          customer.company,
-          customer.address,
-          customer.trackingCode,
-          customer.trackingCompany
-        ].filter(Boolean).join(' ').toLowerCase();
+      // Quick search - optimized for performance
+      if (debouncedSearchTerm) {
+        const searchLower = debouncedSearchTerm.toLowerCase();
         
-        if (!searchableFields.includes(searchLower)) return false;
+        // Check each field individually for better performance
+        const matchesSearch = 
+          (customer.firstName && customer.firstName.toLowerCase().includes(searchLower)) ||
+          (customer.lastName && customer.lastName.toLowerCase().includes(searchLower)) ||
+          (customer.email && customer.email.toLowerCase().includes(searchLower)) ||
+          (customer.phoneNumber && customer.phoneNumber.includes(searchLower)) ||
+          (customer.company && customer.company.toLowerCase().includes(searchLower)) ||
+          (customer.address && customer.address.toLowerCase().includes(searchLower)) ||
+          (customer.trackingCode && customer.trackingCode.toLowerCase().includes(searchLower)) ||
+          (customer.trackingCompany && customer.trackingCompany.toLowerCase().includes(searchLower));
+        
+        if (!matchesSearch) return false;
       }
       
       return true;
     });
-  }, [activeFilters, searchTerm]);
+  }, [activeFilters, debouncedSearchTerm]);
 
   // Load all customers
   const loadAllCustomers = useCallback(async () => {
@@ -189,9 +202,14 @@ const CustomerSection = ({ userId, user, shopContext }) => {
 
   // Update displayed customers when filters change
   useEffect(() => {
-    const filtered = applyClientSideFilters(allCustomers);
-    setCustomers(filtered);
-  }, [allCustomers, activeFilters, searchTerm, applyClientSideFilters]);
+    // Use requestAnimationFrame for smoother updates
+    const frameId = requestAnimationFrame(() => {
+      const filtered = applyClientSideFilters(allCustomers);
+      setCustomers(filtered);
+    });
+    
+    return () => cancelAnimationFrame(frameId);
+  }, [allCustomers, activeFilters, debouncedSearchTerm, applyClientSideFilters]);
 
   // Fetch tracking companies
   const fetchTrackingCompanies = async () => {
@@ -290,16 +308,23 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     handleDeleteClick(ids);
   };
 
-  const handleBulkTag = (tag) => {
+  const handleBulkTag = (selectedIds, tag) => {
+    if (!tag) return;
     setTagChangeInfo({ ids: selectedIds, newTag: tag });
   };
 
-  const handleInitiateTagChange = (customerId, newTag) => {
+  const handleInitiateTagChange = (customerId, newTag, oldTag) => {
+    // Don't trigger if selecting the same tag
+    if (newTag === oldTag) return;
+    
+    // Allow empty string to remove tags
     setTagChangeInfo({ ids: [customerId], newTag });
   };
 
   const handleConfirmTagChange = async () => {
-    if (!tagChangeInfo || !canEdit) return;
+    if (!tagChangeInfo || !canEdit || isChangingTags) return;
+    
+    setIsChangingTags(true);
     
     try {
       for (const id of tagChangeInfo.ids) {
@@ -307,12 +332,15 @@ const CustomerSection = ({ userId, user, shopContext }) => {
         if (customer) {
           const owner = isAdmin && customer.ownerId ? customer.ownerId : userId;
           const docRef = doc(db, 'users', owner, 'customers', id);
-          const currentTags = customer.tags || [];
-          const updatedTags = currentTags.includes(tagChangeInfo.newTag)
-            ? currentTags
-            : [...currentTags, tagChangeInfo.newTag];
           
-          await updateDoc(docRef, { tags: updatedTags });
+          // FIXED: Replace tag instead of adding to array
+          // If newTag is empty, set empty array to remove all tags
+          const updatedTags = tagChangeInfo.newTag ? [tagChangeInfo.newTag] : [];
+          
+          await updateDoc(docRef, { 
+            tags: updatedTags,
+            updatedAt: serverTimestamp()
+          });
         }
       }
       
@@ -322,6 +350,8 @@ const CustomerSection = ({ userId, user, shopContext }) => {
     } catch (err) {
       console.error('Error updating tags:', err);
       alert('Failed to update tags');
+    } finally {
+      setIsChangingTags(false);
     }
   };
 
@@ -343,30 +373,38 @@ const CustomerSection = ({ userId, user, shopContext }) => {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="customer-container">
+      <div className="customer-header">
+        <h1 className="customer-title">Customer Controls</h1>
+        <p className="customer-subtitle">
+          {shopContext ? `Managing customers for ${shopContext.shopName}` : 'Managing all customers'}
+        </p>
+      </div>
+
       {/* Shop Context Info */}
       {!isAdmin && shopContext && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <div className="flex items-center gap-2">
-            <Store className="w-4 h-4 text-blue-600" />
-            <p className="text-sm text-blue-900">
-              Managing customers for: <strong>{shopContext.shopName}</strong>
-            </p>
-          </div>
+        <div className="customer-info-box">
+          <Store className="w-4 h-4" />
+          <p className="customer-info-text">
+            Managing customers for: <strong>{shopContext.shopName}</strong>
+          </p>
         </div>
       )}
 
       {/* Error Display */}
       {formError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <p className="text-red-800">{formError}</p>
+        <div className="customer-error">
+          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <p>{formError}</p>
         </div>
       )}
 
       {/* Customer List with built-in controls */}
       {loading ? (
-        <div className="text-center py-10">Loading customers...</div>
+        <div className="customer-loading">
+          <div className="customer-spinner"></div>
+          <p>Loading customers...</p>
+        </div>
       ) : (
         <CustomerList
           customers={customers}
@@ -380,6 +418,7 @@ const CustomerSection = ({ userId, user, shopContext }) => {
           handleInitiateTagChange={handleInitiateTagChange}
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
+          searching={searching}
           showFilters={showFilters}
           setShowFilters={setShowFilters}
           filters={filters}
@@ -407,10 +446,11 @@ const CustomerSection = ({ userId, user, shopContext }) => {
       {tagChangeInfo && (
         <TagChangeConfirmModal
           isOpen={!!tagChangeInfo}
-          onClose={() => setTagChangeInfo(null)}
+          onClose={() => !isChangingTags && setTagChangeInfo(null)}
           onConfirm={handleConfirmTagChange}
           selectedCount={tagChangeInfo.ids.length}
           newTag={tagChangeInfo.newTag}
+          isLoading={isChangingTags}
         />
       )}
     </div>

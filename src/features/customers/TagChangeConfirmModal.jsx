@@ -1,31 +1,78 @@
+// src/features/customers/TagChangeConfirmModal.jsx
 import React from 'react';
 import Modal from '../../components/Modal';
+import '../../styles/CustomerSection.css';
 
-export default function TagChangeConfirmModal({ tagChangeInfo, onConfirm, onCancel }) {
-  if (!tagChangeInfo) {
-    return null;
-  }
+export default function TagChangeConfirmModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  selectedCount, 
+  newTag,
+  isLoading = false
+}) {
+  if (!isOpen) return null;
 
   return (
-    <Modal isOpen={true} onClose={onCancel}>
-      <div>
-        <h3 className="text-lg font-bold text-gray-800 mb-4">Confirm Tag Change</h3>
-        <p className="text-gray-600">
-          Are you sure you want to change the tag for this customer to
-          <strong className="mx-1.5">{tagChangeInfo.newTag}</strong>?
-        </p>
-        <div className="mt-6 flex justify-end gap-4">
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <div className="customer-modal">
+        <div className="customer-modal-header">
+          <h3 className="customer-modal-title">Confirm Tag Change</h3>
+        </div>
+        
+        <div className="customer-modal-body">
+          {newTag ? (
+            <>
+              <p className="text-gray-600 mb-4">
+                Are you sure you want to change the tag for {selectedCount} customer{selectedCount > 1 ? 's' : ''} to:
+              </p>
+              <div className="text-center mb-6">
+                <span className={`
+                  inline-flex items-center px-4 py-2 rounded-full text-sm font-medium
+                  ${newTag === 'New' ? 'bg-blue-100 text-blue-800' :
+                    newTag === 'VIP' ? 'bg-purple-100 text-purple-800' :
+                    newTag === 'Active' ? 'bg-green-100 text-green-800' :
+                    newTag === 'Inactive' ? 'bg-gray-100 text-gray-800' :
+                    newTag === 'Blocked' ? 'bg-red-100 text-red-800' :
+                    'bg-gray-100 text-gray-800'}
+                `}>
+                  {newTag}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-600 mb-4">
+                Are you sure you want to remove all tags from {selectedCount} customer{selectedCount > 1 ? 's' : ''}?
+              </p>
+              <div className="text-center mb-6">
+                <span className="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
+                  No Tag
+                </span>
+              </div>
+            </>
+          )}
+          <p className="text-sm text-gray-500 text-center">
+            This will replace any existing tags on the selected customers.
+          </p>
+        </div>
+        
+        <div className="customer-modal-footer">
           <button
-            onClick={onCancel}
-            className="px-5 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
+            onClick={onClose}
+            className="customer-btn customer-btn-secondary"
+            disabled={isLoading}
           >
             Cancel
           </button>
           <button
-            onClick={onConfirm}
-            className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={() => {
+              onConfirm();
+            }}
+            className="customer-btn customer-btn-primary"
+            disabled={isLoading}
           >
-            Confirm
+            {isLoading ? 'Updating...' : 'Confirm Change'}
           </button>
         </div>
       </div>
